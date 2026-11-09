@@ -27,7 +27,7 @@ import {
   roleFor,
   plural,
 } from './scan.mjs';
-import { decisionsLead } from './decisions.mjs';
+import { decisionsLead, KNOWN_DECISION_DIRS } from './decisions.mjs';
 import { extractPathTokens } from './check.mjs';
 import { prettierLine, jestLine, frameworkRules, frameworkFilesLine } from './toolchain.mjs';
 
@@ -351,7 +351,13 @@ export function describeEntry(entry) {
   const label = entry.isDir ? `${entry.name}/` : entry.name;
   const role = entry.role ?? roleFor(entry.name);
 
-  const facts = [fileCountSentence(entry)];
+  // Decision records are left out of the count: every `decide` adds one, so a count that
+  // included them was stale before the block was first committed.
+  const recordDir = entry.isDir ? KNOWN_DECISION_DIRS.find((dir) => (entry.files ?? []).some((file) => file.startsWith(`${dir}/`))) : null;
+  const kept = recordDir ? entry.files.filter((file) => !file.startsWith(`${recordDir}/`)) : null;
+  // The language tally was taken over every file; past the filtered total it would read "2 files, 4 of them …".
+  const counted = recordDir ? { ...entry, files: kept, language: entry.language?.total <= kept.length ? entry.language : null } : entry;
+  const facts = [fileCountSentence(counted) + (recordDir ? `, not counting the decision records in \`${recordDir}/\`` : '')];
   if (entry.testFiles > 0) facts.push(`${plural(entry.testFiles, 'test file')}`);
   if (entry.manifest) facts.push(`manifest \`${entry.isDir ? `${entry.name}/` : ''}${entry.manifest}\``);
   if (entry.entryPoint) facts.push(`entry \`${entry.entryPoint}\`${entry.entrySource ? ` (${entry.entrySource})` : ''}`);
@@ -500,7 +506,9 @@ function renderConventions(facts) {
   if (conventions.moduleSystem) lines.push(`Modules: ${conventions.moduleSystem}.`);
 
   if (conventions.typescript) {
-    const parts = [`TypeScript ${conventions.typescript.version.replace(/^[\^~]/, '')}`];
+    // A range is not a version: "~5.8.2" stated as "5.8.2" read as exact while 5.8.3 was installed.
+    const declared = String(conventions.typescript.version);
+    const parts = [`TypeScript ${declared}${/^[\^~><=]|\s|\|\||x|\*/.test(declared) ? ' (package.json range)' : ''}`];
     parts.push(conventions.typescript.hasTsconfig ? 'tsconfig.json present' : 'no tsconfig.json');
     if (conventions.typescript.hasTsconfig) {
       parts.push(conventions.typescript.strict ? '"strict": true' : '"strict" is not set');
@@ -532,7 +540,8 @@ function renderConventions(facts) {
         .join(', ');
       const gap =
         entry.absent.length > 0 ? ` — ${entry.absent.join(', ')} does not declare it` : '';
-      return `${entry.alias} → ${entry.targets.join(', ')} (${where}${gap})`;
+      const targets = entry.targets.map((target) => (target === '.' ? 'the repository root' : target));
+      return `${entry.alias} → ${targets.join(', ')} (${where}${gap})`;
     });
     lines.push(`Import aliases: ${rendered.join('; ')}.`);
 
@@ -992,7 +1001,10 @@ function rewriterNote(facts) {
     ...(facts.rewriters ?? []).map((entry) => `\`${entry.command}\` rewrites files (\`${entry.body}\`); it is not a check.`),
     ...(facts.generated ?? []).map((entry) => `\`${entry.command}\` rewrites \`${entry.path}\`; it is not a check.`),
     ...((facts.longRunning ?? []).length > 0
-      ? [`${facts.longRunning.map((entry) => `\`${entry.command}\``).join(', ')} never exit (${facts.longRunning.map((entry) => `\`${entry.body}\``).join(', ')}); do not run them as checks.`]
+      ? [
+          `${facts.longRunning.map((entry) => `\`${entry.command}\``).join(', ')} ${facts.longRunning.length === 1 ? 'never exits' : 'never exit'} ` +
+            `(${facts.longRunning.map((entry) => `\`${entry.body}\``).join(', ')}); ${facts.longRunning.length === 1 ? 'do not run it as a check' : 'do not run them as checks'}.`,
+        ]
       : []),
   ];
   return notes.length > 0 ? notes.join(' ') : null;
@@ -1179,6 +1191,29 @@ export async function renderBriefing(facts, { version, now }) {
     parts.push(`## Validation\n\n${warningText.trim()}`);
   }
 
+  // The hook's Format step needs a Prettier config and Prettier; its Lint step needs a "lint"
+  // script and ESLint (validate.mjs, --staged). Said from the config and the manifest, not
+  // node_modules, which differs per machine. Claiming both everywhere told agents a repository
+  // with neither was formatted and linted on every commit.
+  const deps = facts.conventions?.deps ?? {};
+  // ESLint and Prettier often arrive through a preset (eslint-config-expo), so a lint script
+  // or a config that names the tool counts as much as a direct dependency.
+  const scripts = facts.pkg?.scripts ?? {};
+  const formats =
+    Boolean(facts.conventions?.prettierConfig || facts.pkg?.prettier || facts.toolchain?.prettier) &&
+    (Boolean(deps.prettier) || Object.values(scripts).some((body) => /\bprettier\b/.test(String(body))));
+  const lints = Boolean(scripts.lint) && (Boolean(deps.eslint) || Boolean(facts.conventions?.eslintConfig) || /\beslint\b/.test(String(scripts.lint)));
+  const steps = ['secret-shaped lines', 'scope', ...(formats ? ['format (Prettier)'] : []), ...(lints ? ['lint (ESLint)'] : [])];
+  const stepList = `${steps.slice(0, -1).join(', ')} and ${steps.at(-1)}`;
+  const prettierConfigured = Boolean(facts.conventions?.prettierConfig || facts.pkg?.prettier || facts.toolchain?.prettier);
+  const missing = [
+    ...(formats ? [] : [prettierConfigured ? 'no Prettier dependency' : 'no Prettier config']),
+    ...(lints ? [] : [scripts.lint ? 'no ESLint' : 'no "lint" script']),
+  ];
+  const skipped = missing.length === 0
+    ? ''
+    : ` Its ${[formats ? null : 'format', lints ? null : 'lint'].filter(Boolean).join(' and ')} ${missing.length > 1 ? 'steps skip' : 'step skips'} here: there is ${missing.join(' and ')}.`;
+
   parts.push(`## Scope
 
 Before editing, name the path prefixes the task owns; the pre-commit hook reports
@@ -1191,8 +1226,8 @@ export NASO_SCOPE=path/to/area,other/area
 The hook runs only where setup installed it, in .git/hooks on that machine; CI does not run it,
 and a fresh clone has none until someone runs \`${nasoCommand()} refresh\` there, which installs it
 and, at the version already vendored, changes nothing else. Every rule below that names the hook
-holds on a machine that has it. It checks staged files for secret-shaped lines, scope, format
-and lint, and adds a line here for a new top-level area; its branch-name check only warns. It does not
+holds on a machine that has it. It checks staged files for ${stepList}, and adds a line here for a
+new top-level area; its branch-name check only warns.${skipped} It does not
 type-check, run tests or read the commit message. If .naso/tooling/ is missing it prints one
 line and lets the commit through.`);
 

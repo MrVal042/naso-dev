@@ -789,3 +789,20 @@ test('a packageManager field with no lockfile of its own loses to the lockfile t
     assert.equal((await detectPackageManager(dir, pkg)).source, 'field');
   });
 });
+
+test('an alias to the repository root is said to point there, not at "*"', async () => {
+  // In the field tsconfig "@/*": ["./*"] was rendered "@ → *", and the import that
+  // proves the mapping is `@/src/lib/utils`.
+  await withRepo(async ({ dir, git }) => {
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', type: 'module' }));
+    await put(dir, 'tsconfig.json', JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }));
+    await put(dir, 'src/index.ts', "import { cn } from '@/src/lib/utils';\n");
+    await put(dir, 'src/lib/utils.ts', 'export const cn = 1;\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'root alias');
+    const { createBriefing } = await import('../tooling/briefing.mjs');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const text = await read(dir, AGENTS);
+    assert.match(text, /^Import aliases: @ → the repository root \(tsconfig\.json as @\/\*\)\./m);
+  });
+});

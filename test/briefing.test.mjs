@@ -16,6 +16,7 @@ import {
   put,
   read,
   seedProject,
+  sectionOf,
 } from './helpers.mjs';
 
 test('the tracked total equals the index, minus AGENTS.md, on a first --track run and every mode after', async () => {
@@ -352,5 +353,66 @@ test('an untouched NASO block is replaced by --force; one edited in review is ke
     const kept = await createBriefing(dir, { force: true });
     assert.equal(kept.reason, 'edited');
     assert.match(await read(dir, AGENTS), /per review/);
+  });
+});
+
+test('the Scope section says which hook steps run in this repository', async () => {
+  // In the field the block said the hook "checks staged files for secret-shaped lines, scope,
+  // format and lint" in a repository with no Prettier config and no ESLint, where both skip.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { lint: 'tsc --noEmit' }, devDependencies: { typescript: '~5.8.2' } }));
+    await git('add', '-A');
+    await git('commit', '-qm', 'no eslint');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const scope = sectionOf(await read(dir, AGENTS), 'Scope');
+    assert.doesNotMatch(scope, /scope, format\s+and lint/);
+    assert.match(scope, /Its format and lint steps skip here: there is no Prettier config and no ESLint\./);
+  });
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^9.0.0', prettier: '^3.0.0' } }));
+    await put(dir, '.prettierrc', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'tools');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const scope = sectionOf(await read(dir, AGENTS), 'Scope');
+    assert.match(scope, /secret-shaped lines, scope, format \(Prettier\) and lint \(ESLint\)/);
+  });
+});
+
+test('an area count leaves out the decision records, which every decide adds to', async () => {
+  // In the field the block said "docs/ — documentation; 10 files." and the first review's
+  // decide calls made it 19 before the block was even committed.
+  const { describeEntry } = await import('../tooling/render.mjs');
+  const line = describeEntry({ name: 'docs', isDir: true, files: ['docs/a.md', 'docs/b.md', 'docs/decisions/README.md', 'docs/decisions/0001-x.md'] });
+  assert.equal(line, '- `docs/` — documentation; 2 files, not counting the decision records in `docs/decisions/`.');
+  assert.equal(describeEntry({ name: 'docs', isDir: true, files: ['docs/a.md'] }), '- `docs/` — documentation; 1 file.');
+});
+
+test('a TypeScript range is stated as the range package.json declares', async () => {
+  // In the field "~5.8.2" was rendered as "TypeScript 5.8.2" with 5.8.3 installed.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', devDependencies: { typescript: '~5.8.2' } }));
+    await put(dir, 'tsconfig.json', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'ts');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const text = await read(dir, AGENTS);
+    assert.match(text, /TypeScript ~5\.8\.2 \(package\.json range\), tsconfig\.json present/);
+  });
+});
+
+test('the never-exit line agrees in number with the scripts it names', async () => {
+  // In the field: "`pnpm run dev` never exit (…); do not run them as checks."
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { dev: 'vite --port=3000', build: 'vite build' } }));
+    await put(dir, 'package-lock.json', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'dev');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    assert.match(await read(dir, AGENTS), /`npm run dev` never exits \(`vite --port=3000`\); do not run it as a check\./);
   });
 });

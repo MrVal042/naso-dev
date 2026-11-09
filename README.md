@@ -142,7 +142,7 @@ Briefing is consistent with the repository: 38 path claim(s) verified, 4 top-lev
 
 - A briefing every coding agent that reads AGENTS.md starts from, with 38 path claims checked against this repository rather than written from memory.
 - Claude Code loads it through CLAUDE.md, so a session starts with it instead of rediscovering the repository.
-- Every commit on this machine is checked before it lands: secret-shaped lines, files outside NASO_SCOPE, format and lint on staged files, and a briefing line for any new top-level area.
+- Every commit on this machine is checked before it lands: secret-shaped lines, files outside NASO_SCOPE, format (with a Prettier config) and lint (with ESLint) on staged files, and a briefing line for any new top-level area. The briefing says which of those steps run in your repository.
 - The gate runs from .naso/tooling/ with no network and no package install.
 - Decisions survive the session: AGENTS.md tells every agent to read docs/decisions/README.md before proposing an approach, and to record what you decide with `npx naso-dev decide`.
 - naso-dev is in devDependencies: teammates get this version from an ordinary install, and production installs leave it out.

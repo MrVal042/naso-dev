@@ -695,7 +695,8 @@ export function parseAliasBlocks(text) {
  */
 export const canonicalAlias = (alias) => String(alias).replace(/\/\*$/, '').replace(/\/+$/, '') || String(alias);
 const canonicalTarget = (target) =>
-  String(target).replace(/^\.\//, '').replace(/\/\*$/, '').replace(/\/+$/, '') || '.';
+  // `./*` is the repository root. Stripped like `./src/*` it became `*`, which reads as a glob.
+  String(target).replace(/^\.\//, '').replace(/^\*$/, '').replace(/\/\*$/, '').replace(/\/+$/, '') || '.';
 
 function canonicalAliases(raw) {
   const out = new Map();

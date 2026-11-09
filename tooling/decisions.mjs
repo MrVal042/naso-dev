@@ -31,7 +31,7 @@ export const DECISIONS_END = '<!-- naso:decisions:end -->';
 const STATUSES = ['proposed', 'accepted', 'rejected', 'superseded', 'deprecated'];
 
 /** Folders teams already keep decision records in, most specific first. */
-const KNOWN_DIRS = [
+export const KNOWN_DECISION_DIRS = [
   'docs/decisions',
   'docs/adr',
   'docs/adrs',
@@ -52,7 +52,7 @@ const isRecord = (name) => /\.md$/i.test(name) && !/^(?:readme|index|template|ad
 /** The decisions folder: the one the repository uses, or the default it would get. */
 export async function decisionsDir(cwd) {
   const pointer = (await readFile(path.join(cwd, '.adr-dir'), 'utf8').catch(() => '')).trim();
-  for (const dir of [pointer, ...KNOWN_DIRS].filter(Boolean)) {
+  for (const dir of [pointer, ...KNOWN_DECISION_DIRS].filter(Boolean)) {
     const names = await readdir(path.join(cwd, dir)).catch(() => null);
     if (names && names.some(isRecord)) return { dir, exists: true };
   }

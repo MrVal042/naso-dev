@@ -357,7 +357,9 @@ test('the Scope section says what the hook checks, what it does not, and when it
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
     const scope = sectionOf(await read(dir, AGENTS), 'Scope').replace(/\s+/g, ' ');
-    assert.match(scope, /checks staged files for secret-shaped lines, scope, format and lint/);
+    // ESLint is configured; Prettier has scripts but no config, and the hook's Format step needs one.
+    assert.match(scope, /checks staged files for secret-shaped lines, scope and lint \(ESLint\)/);
+    assert.match(scope, /Its format step skips here: there is no Prettier config\./);
     assert.match(scope, /does not type-check, run tests or read the commit message/);
     assert.match(scope, /If \.naso\/tooling\/ is missing it prints one line and lets the commit through/);
   });
