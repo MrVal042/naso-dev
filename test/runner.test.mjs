@@ -85,3 +85,11 @@ test('a pnpm repository is never told to run npx, before or after naso-dev is re
     assert.doesNotMatch(recorded.stdout, /npx naso-dev/);
   });
 });
+
+test('nasoCommand ignores a packageManager field the lockfile contradicts', async () => {
+  await withRepo(async ({ dir }) => {
+    const got = await at(dir, { 'package.json': pkg({ packageManager: 'pnpm@9.12.2', ...installed }), 'package-lock.json': '{}' }, '');
+    assert.equal(got.run, 'npx naso-dev');
+  }, { seed: false });
+  setNasoTarget(null);
+});

@@ -769,3 +769,23 @@ test('an area the published command imports is named as what it loads, not by it
     assert.match(text, /^- `scripts\/` — developer scripts;/m);
   });
 });
+
+test('a packageManager field with no lockfile of its own loses to the lockfile that exists', async () => {
+  // In the field: "packageManager": "pnpm@9.12.2", no pnpm-lock.yaml, a maintained
+  // package-lock.json, and every doc saying npm. The briefing told agents to use pnpm, and
+  // NASO's own install had just written package-lock.json.
+  await withRepo(async ({ dir }) => {
+    const pkg = { name: 'app', packageManager: 'pnpm@9.12.2' };
+    await put(dir, 'package.json', JSON.stringify(pkg));
+    await put(dir, 'package-lock.json', '{}\n');
+    assert.deepEqual(await detectPackageManager(dir, pkg), {
+      name: 'npm',
+      source: 'lock',
+      evidence: 'package-lock.json; package.json "packageManager" names pnpm, but there is no pnpm-lock.yaml',
+    });
+
+    // The field still wins when its own lockfile is there, or when there is no lockfile at all.
+    await put(dir, 'pnpm-lock.yaml', '');
+    assert.equal((await detectPackageManager(dir, pkg)).source, 'field');
+  });
+});

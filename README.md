@@ -175,7 +175,7 @@ Why not set up from `npm i naso-dev` itself: npm 7 and later run a package's ins
 
 ### Your package manager, not just npx
 
-Every command NASO prints for you to run is spelled for the package manager this repository uses: its `packageManager` field, then its lockfile, then the manager that launched NASO, then npm.
+Every command NASO prints for you to run is spelled for the package manager this repository uses: its `packageManager` field, then its lockfile, then the manager that launched NASO, then npm. A `packageManager` field with no lockfile of its own, beside another manager's lockfile, was never adopted, so the lockfile wins and the briefing says why.
 
 | Repository uses | naso-dev installed here | not installed |
 | --------------- | ----------------------- | ------------- |

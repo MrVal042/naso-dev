@@ -96,6 +96,22 @@ const LOCKFILE_MANAGERS = [
   ['npm-shrinkwrap.json', 'npm'],
 ];
 
+/**
+ * The manager a packageManager field names, unless the lockfiles contradict it.
+ *
+ * `exists(file)` answers for the repository root. A field whose manager has no lockfile
+ * while another manager's lockfile is there was never adopted: in the field a pnpm pin sat
+ * over a maintained package-lock.json, every doc said npm, and the briefing said pnpm.
+ * Returns `{ name, overruledBy }`, where overruledBy is the lockfile that wins, or null.
+ */
+function fieldManager(field, exists) {
+  const name = KNOWN_PACKAGE_MANAGERS.find((pm) => String(field ?? '').startsWith(`${pm}@`)) ?? null;
+  if (!name) return null;
+  const own = LOCKFILE_MANAGERS.filter(([, pm]) => pm === name).some(([file]) => exists(file));
+  const other = own ? null : LOCKFILE_MANAGERS.find(([file, pm]) => pm !== name && exists(file));
+  return { name, overruledBy: other ? { file: other[0], name: other[1] } : null };
+}
+
 // ---------------------------------------------------------------------------
 // The branch-name convention the repository wrote down
 // ---------------------------------------------------------------------------
@@ -169,7 +185,8 @@ function runnerFacts() {
     pkg = null;
   }
   const field = String(pkg?.packageManager ?? '');
-  let pm = KNOWN_PACKAGE_MANAGERS.find((name) => field.startsWith(`${name}@`)) ?? null;
+  const pinned = fieldManager(field, (file) => existsSync(path.join(dir, file)));
+  let pm = pinned ? (pinned.overruledBy?.name ?? pinned.name) : null;
   if (!pm) pm = LOCKFILE_MANAGERS.find(([file]) => existsSync(path.join(dir, file)))?.[1] ?? null;
   if (!pm) {
     const agent = String(process.env.npm_config_user_agent ?? '').split('/')[0];
@@ -269,9 +286,19 @@ export async function packageManagerFromCI(cwd) {
  */
 export async function detectPackageManager(cwd, pkg) {
   if (pkg?.packageManager) {
-    const name = String(pkg.packageManager).split('@')[0];
-    if (KNOWN_PACKAGE_MANAGERS.includes(name)) {
-      return { name, source: 'field', evidence: `package.json "packageManager": ${pkg.packageManager}` };
+    const present = new Set();
+    for (const [file] of LOCKFILE_MANAGERS) if (await pathExists(path.join(cwd, file))) present.add(file);
+    const pinned = fieldManager(pkg.packageManager, (file) => present.has(file));
+    if (pinned?.overruledBy) {
+      const ownLock = LOCKFILE_MANAGERS.find(([, pm]) => pm === pinned.name)[0];
+      return {
+        name: pinned.overruledBy.name,
+        source: 'lock',
+        evidence: `${pinned.overruledBy.file}; package.json "packageManager" names ${pinned.name}, but there is no ${ownLock}`,
+      };
+    }
+    if (pinned) {
+      return { name: pinned.name, source: 'field', evidence: `package.json "packageManager": ${pkg.packageManager}` };
     }
   }
 
