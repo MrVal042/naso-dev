@@ -146,9 +146,9 @@ test('the package is named naso-dev and the bin matches it', async () => {
 
 test('package metadata points at the repository and gates a publish on the tests', async () => {
   const pkg = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
-  assert.match(pkg.repository.url, /github\.com\/MrVal042\/\.naso/);
-  assert.match(pkg.bugs.url, /github\.com\/MrVal042\/\.naso\/issues/);
-  assert.ok(pkg.homepage.startsWith('https://github.com/MrVal042/.naso'));
+  assert.match(pkg.repository.url, /github\.com\/MrVal042\/naso-dev\.git$/);
+  assert.match(pkg.bugs.url, /github\.com\/MrVal042\/naso-dev\/issues/);
+  assert.ok(pkg.homepage.startsWith('https://github.com/MrVal042/naso-dev'));
   assert.equal(pkg.scripts.prepublishOnly, 'node --test test/*.test.mjs');
   assert.equal(pkg.scripts.test, 'node --test test/*.test.mjs');
   for (const wanted of ['bin', 'tooling', 'VERSION', 'README.md', 'LICENSE']) {

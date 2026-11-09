@@ -27,16 +27,29 @@
     "agents.md",
     "briefing",
     "pre-commit",
-    "code-review"
+    "code-review",
+    "ai",
+    "ai-agents",
+    "coding-agent",
+    "claude",
+    "claude-code",
+    "cursor",
+    "copilot",
+    "codex",
+    "llm",
+    "developer-tools",
+    "cli",
+    "naso",
+    "naso-dev"
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/MrVal042/.naso.git"
+    "url": "git+https://github.com/MrVal042/naso-dev.git"
   },
   "bugs": {
-    "url": "https://github.com/MrVal042/.naso/issues"
+    "url": "https://github.com/MrVal042/naso-dev/issues"
   },
-  "homepage": "https://github.com/MrVal042/.naso#readme",
+  "homepage": "https://github.com/MrVal042/naso-dev#readme",
   "license": "MIT",
   "engines": {
     "node": ">=20"

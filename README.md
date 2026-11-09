@@ -348,7 +348,7 @@ Created and maintained by **Valentine Asogwa (MrVal)**.
 Issues and pull requests are welcome. For anything larger than a small fix, open an issue first so the approach can be agreed before the work is done.
 
 ```bash
-git clone https://github.com/MrVal042/.naso.git && cd .naso
+git clone https://github.com/MrVal042/naso-dev.git && cd naso-dev
 npm test
 ```
 
@@ -356,7 +356,7 @@ There is nothing to install first: NASO has no dependencies, and the tests run o
 
 ## Contributors
 
-Thanks to everyone who has contributed. See the [contributors graph](https://github.com/MrVal042/.naso/graphs/contributors).
+Thanks to everyone who has contributed. See the [contributors graph](https://github.com/MrVal042/naso-dev/graphs/contributors).
 
 ## Support
 

@@ -24,7 +24,7 @@ A test that never failed proves nothing about the bug it claims to cover.
 ## Getting set up
 
 ```bash
-git clone https://github.com/MrVal042/.naso.git && cd .naso
+git clone https://github.com/MrVal042/naso-dev.git && cd naso-dev
 npm test
 ```
 
