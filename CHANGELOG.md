@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.5.4
+
+### Fixed
+
+- **A directory passed as a value no longer becomes the repository.** `decide --applies supabase/migrations/` printed `pnpm dlx naso-dev decisions accept` while every other decide in the same repository printed `pnpm exec`: the bin read the `--applies` directory as the target, found no package.json there, and spelled the command for a repository without naso-dev. The target is now the last positional argument as the commands themselves parse it.
+- **A quote is checked against the citation next to it.** The checker paired each “…” with the citation whose start was nearest, so a citation closing the previous sentence beat the one right after the quote, and a correct quote was reported WRONG. It now measures the text between them, and a tie goes to the citation after the quote.
+- **Import-alias prefixes are not path claims.** "`@/` resolves to the repository root" was reported as MISSING: @/. Tokens starting `@/`, `~/` or `#/` are skipped.
+- **A `packageManager` field the lockfiles contradict loses.** A pnpm pin with no `pnpm-lock.yaml` over a maintained `package-lock.json` made the briefing say pnpm while every doc said npm. The lockfile now wins, and the Package manager line says why.
+- **The Scope section says which hook steps run.** It said the hook checks "format and lint" in a repository with no Prettier config and no ESLint, where both steps skip. It now names the steps that run and why the others skip.
+- **`validate` no longer type-checks twice.** With `"lint": "tsc --noEmit"` and no `typecheck` script, the full run ran tsc as Lint and again as TypeScript. The second run is skipped and says why.
+- **Area counts leave out decision records.** "`docs/` — documentation; 10 files" went stale with the first `decide`. The count excludes the decisions folder and says so.
+- **A TypeScript range is stated as a range.** `~5.8.2` was rendered "TypeScript 5.8.2" with 5.8.3 installed.
+- **An alias to the repository root says so.** tsconfig `"@/*": ["./*"]` was rendered "@ → *". It is now "@ → the repository root".
+- **The never-exit line agrees in number.** "`pnpm run dev` never exit …; do not run them as checks" now reads "never exits …; do not run it as a check" for one script.
+
 ## 1.5.3
 
 ### Fixed
