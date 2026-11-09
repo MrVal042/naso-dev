@@ -761,6 +761,10 @@ async function runFull(cwd, pkg, pm, { prefixes, strictScope }) {
   if (scripts.typecheck) {
     const [cmd, args] = pmRunCommand(pm, 'typecheck');
     await runStep('TypeScript', cmd, args, cwd);
+  } else if (/^\s*tsc(?:\s+(?:--noEmit|-p\s+\S+|--project\s+\S+))*\s*$/.test(String(scripts.lint ?? '')) && /--noEmit/.test(scripts.lint)) {
+    // A "lint" that is `tsc --noEmit` already ran above; running tsc again doubles the slowest
+    // step and reports the same errors twice.
+    record('TypeScript', 'skip', 'the "lint" script is the type-check');
   } else if (hasTsconfig && (await hasLocalBin(cwd, 'tsc'))) {
     const [cmd, args] = pmExecCommand(pm, 'tsc', ['--noEmit']);
     await runStep('TypeScript', cmd, args, cwd);

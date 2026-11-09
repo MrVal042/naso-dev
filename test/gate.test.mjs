@@ -443,3 +443,35 @@ test('a lock that cannot be released is reported, not silently left behind', asy
   }
   assert.ok(said.some((line) => /\.naso\.lock/.test(line) && /remove it by hand/.test(line)), said.join('\n'));
 });
+
+test('validate does not type-check twice when the lint script is the type-check', async () => {
+  // In the field `lint` was `tsc --noEmit`: the full run ran it as Lint, then ran
+  // `tsc --noEmit` again as TypeScript.
+  await withRepo(async ({ dir, git }) => {
+    await put(dir, 'package.json', JSON.stringify({ name: 'tsc-lint', scripts: { lint: 'tsc --noEmit' } }));
+    await put(dir, 'package-lock.json', '{}\n');
+    await put(dir, 'tsconfig.json', '{}\n');
+    await put(dir, '.gitignore', 'node_modules/\n');
+    await put(dir, 'src/index.ts', 'export const x = 1;\n');
+    await put(dir, 'node_modules/.bin/tsc', '#!/bin/sh\nexit 0\n');
+    await chmod(path.join(dir, 'node_modules/.bin/tsc'), 0o755);
+    await git('add', '-A');
+    await git('commit', '-qm', 'tsc lint');
+
+    const fakeBin = await mkdtemp(path.join(os.tmpdir(), 'naso-fakebin-'));
+    const log = path.join(fakeBin, 'calls.log');
+    try {
+      for (const name of ['npm', 'npx']) {
+        await writeFile(path.join(fakeBin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`);
+        await chmod(path.join(fakeBin, name), 0o755);
+      }
+      const full = await exec(process.execPath, [path.join(TOOL_DIR, 'validate.mjs'), dir], dir, { PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` });
+      assert.equal(full.code, 0, full.stdout + full.stderr);
+      const calls = (await readFile(log, 'utf8')).trim().split('\n');
+      assert.deepEqual(calls, ['npm run lint'], calls.join('\n'));
+      assert.match(full.stdout, /TypeScript: SKIP \(the "lint" script is the type-check\)/);
+    } finally {
+      await rm(fakeBin, { recursive: true, force: true });
+    }
+  });
+});
