@@ -4,7 +4,7 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stat } from 'node:fs/promises';
-import { toolVersion, SUPPORT_EMAIL, pathExists, nasoCommand, setNasoTarget } from '../tooling/lib.mjs';
+import { toolVersion, SUPPORT_EMAIL, pathExists, nasoCommand, setNasoTarget, parseArgs } from '../tooling/lib.mjs';
 
 const TOOL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'tooling');
 
@@ -44,23 +44,20 @@ async function usage() {
   console.log('Every command accepts --help. Support: ' + SUPPORT_EMAIL);
 }
 
-/** Flags whose next argument is a value, not a directory. */
-const VALUE_FLAGS = new Set(['--exclude', '--hook-action', '--scope']);
-
 /**
- * The repository a run is about: the last argument that is a directory, or the working
- * directory. The last, because `guide src .` names an area first and the repository after.
- * Every command NASO prints for that repository is spelled in its package manager.
+ * The repository a run is about: the last positional argument that is a directory, or the
+ * working directory. The last, because `guide src .` names an area first and the repository
+ * after. Every command NASO prints for that repository is spelled in its package manager.
+ *
+ * Positional as the commands themselves parse it. A hand-kept list of value flags missed
+ * decide's `--applies supabase/migrations/`: the directory became the target, it had no
+ * package.json, and that one decide printed `pnpm dlx` where the others printed `pnpm exec`.
  */
 async function targetOf(args) {
+  const { positional } = parseArgs(args, { valued: args[0] === 'decide' ? ['why'] : [] });
   let found = null;
-  for (let i = 0; i < args.length; i++) {
-    if (VALUE_FLAGS.has(args[i])) {
-      i++;
-      continue;
-    }
-    if (args[i].startsWith('-')) continue;
-    if ((await stat(args[i]).catch(() => null))?.isDirectory()) found = args[i];
+  for (const arg of positional) {
+    if ((await stat(arg).catch(() => null))?.isDirectory()) found = arg;
   }
   return found;
 }

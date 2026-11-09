@@ -231,3 +231,19 @@ test('the decisions list is written with blank lines around headings, lists and 
     assert.match(index, /<!-- naso:decisions:start -->\n\n## Proposed, not binding until a person accepts\n\n- \[0001 Use REST\]\(0001-use-rest\.md\) — kickoff\n\n<!-- naso:decisions:end -->/);
   });
 });
+
+test('a directory passed as --applies does not change how printed commands are spelled', async () => {
+  // In the field, `decide --applies supabase/migrations/` printed `pnpm dlx naso-dev decisions
+  // accept` while every other decide in the same repository printed `pnpm exec`: the bin read
+  // the --applies directory as the repository, found no package.json there, and spelled the
+  // command for a repository without naso-dev installed.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', packageManager: 'pnpm@9.12.2', devDependencies: { 'naso-dev': '^1.5.3' } }));
+    await put(dir, 'supabase/migrations/0001.sql', 'select 1;\n');
+    const listed = await naso(dir, ['decide', '--title', 'Use RLS', '--decision', 'RLS.', '--source', 'kickoff', '--applies', 'src/,supabase/']);
+    const single = await naso(dir, ['decide', '--title', 'Use helpers', '--decision', 'Helpers.', '--source', 'kickoff', '--applies', 'supabase/migrations/']);
+    assert.match(listed.stdout, /accepts it with: pnpm exec naso-dev decisions accept 0001/, listed.stdout + listed.stderr);
+    assert.match(single.stdout, /accepts it with: pnpm exec naso-dev decisions accept 0002/, single.stdout + single.stderr);
+  });
+});
