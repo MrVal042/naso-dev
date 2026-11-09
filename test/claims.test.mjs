@@ -415,3 +415,20 @@ test('design tokens and example env files are not credential warnings; real key 
     assert.doesNotMatch(warning, /tokens\.ts|\.env\.example/);
   });
 });
+
+test('a quote is checked against the citation next to it, not the first one on the line', async () => {
+  // In the field: "… app (`README.md` line 3). “QA Sync is a browser application …”
+  // (`docs/production-environment.md` line 5)" was reported as a misquote of README.md line 3.
+  const { wrongClaims } = await import('../tooling/check.mjs');
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'README.md', '# App\n\nAn internal QA app.\n');
+    await put(dir, 'docs/env.md', '# Env\n\nThe app is a browser application backed by Supabase.\n');
+    const before = 'It is a QA app (`README.md` line 3). “The app is a browser application backed by Supabase.” (`docs/env.md` line 3)';
+    const after = '“The app is a browser application backed by Supabase.” (`docs/env.md` line 3) It is a QA app (`README.md` line 3).';
+    assert.deepEqual(await wrongClaims(dir, before), []);
+    assert.deepEqual(await wrongClaims(dir, after), []);
+    const wrong = await wrongClaims(dir, 'It is a QA app (`README.md` line 3). “The app is a desktop application.” (`docs/env.md` line 3)');
+    assert.equal(wrong.length, 1);
+    assert.match(wrong[0], /`docs\/env\.md` line 3: the quote is not in that line; first differing word: "desktop"/);
+  });
+});

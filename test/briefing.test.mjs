@@ -126,6 +126,12 @@ test('extractPathTokens pulls backtick-quoted paths', () => {
   assert.deepEqual(new Set(tokens), new Set(['src/foo.ts', 'docs/guide.md']));
 });
 
+test('extractPathTokens leaves import-alias prefixes alone', () => {
+  // In the field, "`@/` resolves to the repository root" was reported as MISSING: @/.
+  const tokens = extractPathTokens('`@/` resolves to the root, so `@/src/lib/utils` and `~/components` are imports; `src/lib/utils.ts` is a file.');
+  assert.deepEqual(tokens, ['src/lib/utils.ts']);
+});
+
 test('createBriefing on a repository with no AGENTS.md writes the markers', async () => {
   await withRepo(async ({ dir, git }) => {
     await seedProject(dir, git);

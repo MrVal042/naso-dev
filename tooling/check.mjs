@@ -94,6 +94,9 @@ export function extractPathTokens(text) {
     if (token.includes('*') || token.includes('<') || token.includes('>')) continue;
     if (token.includes(' ')) continue;
     if (token.startsWith('-')) continue;
+    // `@/`, `~/` and `#/` are import-alias prefixes, not folders: a briefing that explains
+    // where `@/` points was reported as missing the path "@/".
+    if (/^[@~#]\//.test(token)) continue;
     if (TOOL_SCRIPT_NAMES.test(token)) continue;
     if (!PATH_SHAPED_TOKEN.test(token)) continue;
     if (!NAMES_A_PATH.test(token) && !EXTENSIONLESS_FILES.test(token)) continue;
@@ -239,7 +242,12 @@ async function misquotedCitations(cwd, claimed) {
     const cites = [...line.matchAll(citation)];
     if (cites.length === 0) continue;
     for (const quote of line.matchAll(/“([^”]+)”/g)) {
-      const near = cites.reduce((best, cite) => (Math.abs(cite.index - quote.index) < Math.abs(best.index - quote.index) ? cite : best));
+      // Nearest by the text between them, not by where each starts: measured from the start,
+      // a citation that closes the previous sentence beat the one right after the quote.
+      // On a tie the citation after the quote wins, as in “…” (`file` line N).
+      const end = quote.index + quote[0].length;
+      const gap = (cite) => (cite.index >= end ? cite.index - end : Math.max(0, quote.index - (cite.index + cite[0].length)) + 0.5);
+      const near = cites.reduce((best, cite) => (gap(cite) < gap(best) ? cite : best));
       const [, file, first, last = first] = near;
       if (!files.has(file)) files.set(file, await readFile(path.join(cwd, file), 'utf8').catch(() => null));
       const text = files.get(file);
