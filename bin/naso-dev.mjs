@@ -15,6 +15,7 @@ const COMMANDS = {
   guide: { module: 'guide.mjs', blurb: 'Guide for one area, or --tour for a read-through of the whole briefing' },
   validate: { module: 'validate.mjs', blurb: 'Pre-commit gate: secrets, scope, format, lint, briefing' },
   doctor: { module: 'doctor.mjs', blurb: 'Diagnose the environment and the install' },
+  stats: { module: 'stats.mjs', blurb: 'Estimate the tokens an agent loads at session start, and the largest parts' },
   decide: { module: 'decisions.mjs', fn: 'decideMain', blurb: 'Record a decision the team made, with where it was made' },
   decisions: { module: 'decisions.mjs', blurb: 'List, accept, reject, supersede or audit recorded decisions' },
 };

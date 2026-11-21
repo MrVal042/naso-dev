@@ -491,6 +491,7 @@ const BOOLEAN_FLAGS = new Set([
   'accept',
   'discard-edits',
   'no-ignore-files',
+  'json',
 ]);
 
 /** Single-letter spellings, mapped to the long flag they stand for. */

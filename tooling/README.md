@@ -51,6 +51,7 @@ every commit with a message nobody can act on.
 | `validate.mjs`   | The gate. `--staged` is what the hook runs; the default is the whole-project CI run.                                                                                |
 | `guide.mjs`      | The guide for one area. `--tour` gives the section-by-section read-through instead.                                                                                  |
 | `doctor.mjs`     | Environment and install diagnostics, including what the repository's ESLint prints for `.naso/`. Changes nothing.                                                  |
+| `stats.mjs`      | The `stats` command: the estimated tokens of everything an agent loads at session start, each file once, imports followed the way Claude Code follows them, and the largest sections. Reads only. |
 | `install.mjs`    | Git plumbing: the hook body, the hooks directory, `.git/info/exclude`, the `CLAUDE.md` link, leftover detection.                                                    |
 | `lock.mjs`       | A cooperative filesystem mutex, so two agents cannot rewrite one `AGENTS.md` at the same moment.                                                                     |
 | `prompt.mjs`     | The setup's questions (confirm, select) on Node's own readline. Arrow keys or j/k move, Enter answers, Ctrl+C or Escape cancels. Not vendored. |

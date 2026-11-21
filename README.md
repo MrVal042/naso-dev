@@ -305,6 +305,7 @@ Git never copies `.git/hooks`, so a fresh clone has no hook. Where `.naso/` is c
 | `npx naso-dev decide --title … --source … --decision …`           | Record a decision the team made, as proposed, with where it was made. Also `--why`, `--considered` (repeatable), `--by`, `--applies`, `--supersedes <id>`, and `--accept` for the person who made it. |
 | `npx naso-dev decisions [accept\|reject\|supersede\|audit\|sync]` | List, settle or audit the recorded decisions. The audit changes nothing. |
 | `npx naso-dev doctor [target]`                                      | Environment and install diagnostics: Node, git, hook, vendored copy and the naso-dev package.json records, the version setup ran with, what the repository's ESLint prints for `.naso/`, briefing consistency, the Claude Code link, leftovers. |
+| `npx naso-dev stats [target] [--json]`                              | What an agent loads at session start, in estimated tokens (4 characters each): `CLAUDE.md` and every file it imports, `AGENTS.md`, and the handoff's NOW section, each counted once, with the largest sections. Reads only; needs no git and no manifest. The numbers NASO is held to are in [docs/benchmarks.md](docs/benchmarks.md). |
 
 All commands accept `--help`. `init` and `setup` are retired but still run; both are covered by the test suite.
 
