@@ -15,6 +15,7 @@
 
 ### Changed
 
+- **Every setup question defaults to Yes, marked (recommended).** Enter now commits AGENTS.md and `.naso/`, chains a hook NASO did not write, installs into a tracked `core.hooksPath`, regenerates an untouched NASO block, points the agents this repository uses (or all four) at AGENTS.md, and adds the Claude Code hooks and skills. Claude Code deny rules default to `NASO_SCOPE` when it is set and stay No otherwise, because which CODEOWNERS owner you are cannot be guessed. The plan is still shown and accepted before anything is written, and `--yes` asks nothing, so scripted runs keep their defaults.
 - The examples and the demo are regenerated with 2.0.2.
 
 ## 2.0.1

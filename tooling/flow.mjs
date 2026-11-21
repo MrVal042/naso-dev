@@ -208,9 +208,11 @@ function reportExistingState(state, cwd, style) {
 /**
  * Ask what the plan depends on, and nothing it does not.
  *
- * Each question has a conservative default — keep the files out of git, leave a hook
- * NASO did not write alone, rewrite nothing — so a run of Enters produces the least
- * invasive install that still works. A question whose answer cannot change the plan is
+ * Each question defaults to Yes, marked "(recommended)": commit the briefing so every clone
+ * gets it, chain a hook NASO did not write, regenerate an untouched block, point the other
+ * agents and Claude Code at it. A run of Enters gives the complete install, and the plan is
+ * still shown before anything is written. `--yes` asks nothing, so a scripted run keeps the
+ * flags' own defaults. A question whose answer cannot change the plan is
  * not asked: the hook question only appears when there is a choice to make, and the
  * block question only when there is a block.
  */
@@ -218,8 +220,8 @@ async function ask(style, options, context, io = {}) {
   note('Answer with Enter to accept the default. Nothing is written until you accept the plan.', style.bold('Questions'), { style, ...io });
 
   const track = await confirm({
-    message: 'Commit AGENTS.md and .naso/ to git? (No keeps them local to this machine.)',
-    initialValue: options.track,
+    message: 'Commit AGENTS.md and .naso/ to git, so every clone gets the same briefing? (No keeps them local to this machine.)',
+    initialValue: true,
     style,
     ...io,
   });
@@ -231,9 +233,9 @@ async function ask(style, options, context, io = {}) {
   if (!noHook && !hookAction && hook.state === 'foreign') {
     const choice = await select({
       message: `Hook: existing hook at ${hook.path}, not written by NASO. What should happen to it?`,
-      initialValue: 'skip',
+      initialValue: 'chain',
       options: [
-        { value: 'chain', label: 'Chain', hint: 'move it aside unchanged; NASO\'s hook runs it first' },
+        { value: 'chain', label: 'Chain (recommended)', hint: 'move it aside unchanged; NASO\'s hook runs it first' },
         { value: 'skip', label: 'Skip', hint: 'leave it exactly as it is; no NASO hook' },
         { value: 'abort', label: 'Abort', hint: 'write nothing at all' },
       ],
@@ -245,9 +247,9 @@ async function ask(style, options, context, io = {}) {
   } else if (!noHook && !hookAction && hook.trackedDir) {
     const choice = await select({
       message: `core.hooksPath is ${hook.hooksPath}, which git tracks. Write the pre-commit hook there?`,
-      initialValue: 'skip',
+      initialValue: 'install',
       options: [
-        { value: 'install', label: 'Install there', hint: 'the hook becomes a file in your next commit' },
+        { value: 'install', label: 'Install there (recommended)', hint: 'the hook becomes a file in your next commit' },
         { value: 'skip', label: 'Skip', hint: 'no NASO hook; run the gate by hand' },
         { value: 'abort', label: 'Abort', hint: 'write nothing at all' },
       ],
@@ -264,11 +266,12 @@ async function ask(style, options, context, io = {}) {
 
   let force = options.force;
   // An edited block is not offered for replacement: the answer that discards reviewed
-  // corrections is not one a person should be able to give by pressing Enter.
+  // corrections is not one a person should be able to give by pressing Enter. An untouched
+  // one holds nothing a person wrote, so regenerating it loses nothing.
   if (!force && context.hasBlock && !context.blockEdited) {
     const replace = await confirm({
       message: 'AGENTS.md already has a NASO block. Replace it with one generated from the repository as it is now?',
-      initialValue: false,
+      initialValue: true,
       style,
       ...io,
     });
@@ -296,17 +299,19 @@ async function ask(style, options, context, io = {}) {
   }
 
   const extras = {};
-  // Pointers for other agents, only from the real flow (it passes `agents`). No is the
-  // default: they are files outside .naso/, and an agent detected here is offered first.
+  // Pointers for other agents, only from the real flow (it passes `agents`). The default is
+  // the agents this repository shows signs of, or all four when it shows none.
   if (context.agents && (options.agents ?? []).length === 0) {
     const detected = context.agents;
+    const recommended = detected.length > 0 ? 'detected' : 'all';
+    const mark = (value) => (value === recommended ? ' (recommended)' : '');
     const choice = await select({
       message: 'Point other agents at AGENTS.md? (one line each, never a copy; Claude Code gets CLAUDE.md, Codex reads AGENTS.md itself)',
-      initialValue: 'none',
+      initialValue: recommended,
       options: [
+        ...(detected.length > 0 ? [{ value: 'detected', label: `The ones set up here: ${detected.map((entry) => entry.label).join(', ')}${mark('detected')}`, hint: detected.map((entry) => entry.signs[0]).join(', ') }] : []),
+        { value: 'all', label: `Cursor, Copilot, Gemini and Windsurf${mark('all')}`, hint: 'a file each' },
         { value: 'none', label: 'No' },
-        ...(detected.length > 0 ? [{ value: 'detected', label: `The ones set up here: ${detected.map((entry) => entry.label).join(', ')}`, hint: detected.map((entry) => entry.signs[0]).join(', ') }] : []),
-        { value: 'all', label: 'Cursor, Copilot, Gemini and Windsurf', hint: 'a file each' },
       ],
       style,
       ...io,
@@ -316,18 +321,20 @@ async function ask(style, options, context, io = {}) {
     if (choice === 'all') extras.agents = ['all'];
   }
 
-  // Claude Code extras, last, and only from the real flow (it passes `claude`). Every
-  // default is No: they write into .claude/, which is the person's, and NASO works without them.
+  // Claude Code extras, last, and only from the real flow (it passes `claude`). Hooks and
+  // skills default to Yes. Deny rules default to NASO_SCOPE when it is set; otherwise to No,
+  // because which CODEOWNERS owner the person is cannot be guessed, and a wrong guess denies
+  // them their own files.
   if (context.claude) {
     const { owners = [], scope = [] } = context.claude;
     if (!options.claudeDeny && (owners.length > 0 || scope.length > 0)) {
       const choice = await select({
         message: 'Claude Code: deny edits to paths that are not yours? (.claude/settings.local.json, this machine only)',
-        initialValue: 'none',
+        initialValue: scope.length > 0 ? 'scope' : 'none',
         options: [
-          { value: 'none', label: 'No', hint: 'Claude Code may edit any path' },
+          ...(scope.length > 0 ? [{ value: 'scope', label: 'Use NASO_SCOPE (recommended)', hint: scope.join(', ') }] : []),
           ...owners.slice(0, 8).map((owner) => ({ value: `owner:${owner}`, label: `I am ${owner}`, hint: 'deny what CODEOWNERS gives to others' })),
-          ...(scope.length > 0 ? [{ value: 'scope', label: 'Use NASO_SCOPE', hint: scope.join(', ') }] : []),
+          { value: 'none', label: 'No', hint: 'Claude Code may edit any path' },
         ],
         style,
         ...io,
@@ -339,12 +346,12 @@ async function ask(style, options, context, io = {}) {
       }
     }
     if (!options.claudeHooks) {
-      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: false, style, ...io });
+      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: true, style, ...io });
       if (isCancel(hooks)) return null;
       extras.claudeHooks = hooks;
     }
     if (!options.claudeSkills) {
-      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: false, style, ...io });
+      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: true, style, ...io });
       if (isCancel(skills)) return null;
       extras.claudeSkills = skills;
     }
@@ -369,7 +376,7 @@ export function terminalPrompts(io = {}) {
         message: installsHook ? 'Write these files and install the hook?' : 'Write these files? (No hook will be installed.)',
         initialValue: 'accept',
         options: [
-          { value: 'accept', label: 'Accept', hint: 'write exactly the files listed above' },
+          { value: 'accept', label: 'Accept (recommended)', hint: 'write exactly the files listed above' },
           { value: 'details', label: 'Show details', hint: 'every file, what the briefing says, and why' },
           {
             value: 'reject',

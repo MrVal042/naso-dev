@@ -125,18 +125,20 @@ test('setup writes pointers only when asked, lists them in its plan, and names a
   });
 });
 
-test('in a terminal, setup asks about other agents, Enter answers No, and the detected ones can be picked', async () => {
+test('in a terminal, setup asks about other agents, Enter answers the recommended ones, and No can be picked', async () => {
   const none = { state: 'none' };
   const agents = [{ name: 'cursor', label: 'Cursor', signs: ['.cursor'] }];
   const defaults = await answerRealQuestions({ hook: none, hasBlock: false, agents }, ['\r', '\r', '\r']);
-  assert.equal(defaults.answer.agents, undefined);
+  assert.deepEqual(defaults.answer.agents, ['cursor']);
+  assert.equal(defaults.answer.track, true, 'Enter commits the briefing');
   assert.match(defaults.frames, /Point other agents at AGENTS\.md/);
-  assert.match(defaults.frames, /The ones set up here: Cursor/);
+  assert.match(defaults.frames, /The ones set up here: Cursor \(recommended\)/);
 
-  const picked = await answerRealQuestions({ hook: none, hasBlock: false, agents }, ['\r', '\r', '\u001b[B', '\r']);
-  assert.deepEqual(picked.answer.agents, ['cursor']);
+  // Down twice: past all four, to No.
+  const declined = await answerRealQuestions({ hook: none, hasBlock: false, agents }, ['\r', '\r', '\u001b[B', '\u001b[B', '\r']);
+  assert.equal(declined.answer.agents, undefined);
 
-  const all = await answerRealQuestions({ hook: none, hasBlock: false, agents: [] }, ['\r', '\r', '\u001b[B', '\r']);
+  const all = await answerRealQuestions({ hook: none, hasBlock: false, agents: [] }, ['\r', '\r', '\r']);
   assert.deepEqual(all.answer.agents, ['all']);
 });
 
