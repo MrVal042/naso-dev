@@ -17,7 +17,7 @@ const read = (cwd, file) => readFile(path.join(cwd, file), 'utf8').catch(() => n
 // CODEOWNERS
 // ---------------------------------------------------------------------------
 
-const CODEOWNERS_FILES = ['CODEOWNERS', '.github/CODEOWNERS', '.gitlab/CODEOWNERS', 'docs/CODEOWNERS'];
+export const CODEOWNERS_FILES = ['CODEOWNERS', '.github/CODEOWNERS', '.gitlab/CODEOWNERS', 'docs/CODEOWNERS'];
 
 
 /**

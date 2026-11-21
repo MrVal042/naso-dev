@@ -33,6 +33,7 @@ import {
   runtimeEntry,
   topLevelEntries,
 } from './scan.mjs';
+import { deriveTraps, TRAPS_HEADING } from './traps.mjs';
 
 // ---------------------------------------------------------------------------
 // Checking
@@ -348,12 +349,32 @@ export const SECTIONS_SINCE = [
     heading: 'Read First',
     since: '1.6.0',
     why: 'it tells the agent to read the handoff first and to keep it current',
+    place: 'right after the "What this is" line (after the title if there is none)',
+  },
+  {
+    heading: TRAPS_HEADING,
+    since: '1.6.0',
+    why: 'it states the rules an agent gets wrong, each with its reason and source',
+    place: 'right after the "When This Block Is Wrong" section',
+    // Only where there is something to say: a repository with no decisions, owners,
+    // templates or written rules gets no section, so it is not missing one.
+    applies: async (cwd) => {
+      const files = await listRepoFiles(cwd).catch(() => []);
+      const pkg = await readFile(path.join(cwd, 'package.json'), 'utf8').then(JSON.parse).catch(() => null);
+      return (await deriveTraps(cwd, files ?? [], { pkg })).length > 0;
+    },
   },
 ];
 
-/** The SECTIONS_SINCE entries a NASO block lacks. Text outside the markers does not count. */
-export function missingSections(block) {
-  return SECTIONS_SINCE.filter((section) => !new RegExp(`^##\\s+${escapeRegExp(section.heading)}\\s*$`, 'm').test(block));
+/** The SECTIONS_SINCE entries a NASO block lacks and this repository would have. Text outside the markers does not count. */
+export async function missingSections(block, cwd) {
+  const missing = [];
+  for (const section of SECTIONS_SINCE) {
+    if (new RegExp(`^##\\s+${escapeRegExp(section.heading)}\\s*$`, 'm').test(block)) continue;
+    if (section.applies && !(await section.applies(cwd))) continue;
+    missing.push(section);
+  }
+  return missing;
 }
 
 export async function checkBriefing(cwd) {
@@ -384,7 +405,7 @@ export async function checkBriefing(cwd) {
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
-  const notices = start !== -1 && end > start ? missingSections(claimed) : [];
+  const notices = start !== -1 && end > start ? await missingSections(claimed, cwd) : [];
 
   const markerCounts = MARKERS.map((marker) => ({
     marker,

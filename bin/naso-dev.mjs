@@ -16,6 +16,8 @@ const COMMANDS = {
   validate: { module: 'validate.mjs', blurb: 'Pre-commit gate: secrets, scope, format, lint, briefing' },
   doctor: { module: 'doctor.mjs', blurb: 'Diagnose the environment and the install' },
   handoff: { module: 'handoff.mjs', blurb: 'Create, add to, trim or print the handoff between sessions' },
+  lesson: { module: 'lessons.mjs', fn: 'lessonMain', blurb: 'Record what a session learned: one file, one index line' },
+  lessons: { module: 'lessons.mjs', blurb: 'Print the lessons index, or audit it for stale, duplicate or contradicting lessons' },
   stats: { module: 'stats.mjs', blurb: 'Estimate the tokens an agent loads at session start, and the largest parts' },
   decide: { module: 'decisions.mjs', fn: 'decideMain', blurb: 'Record a decision the team made, with where it was made' },
   decisions: { module: 'decisions.mjs', blurb: 'List, accept, reject, supersede or audit recorded decisions' },
@@ -56,7 +58,7 @@ async function usage() {
  * package.json, and that one decide printed `pnpm dlx` where the others printed `pnpm exec`.
  */
 async function targetOf(args) {
-  const { positional } = parseArgs(args, { valued: args[0] === 'decide' ? ['why'] : [] });
+  const { positional } = parseArgs(args, { valued: ['decide', 'lesson'].includes(args[0]) ? ['why'] : [] });
   let found = null;
   for (const arg of positional) {
     if ((await stat(arg).catch(() => null))?.isDirectory()) found = arg;

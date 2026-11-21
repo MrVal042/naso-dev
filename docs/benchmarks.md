@@ -104,3 +104,29 @@ A realistic NOW, a state paragraph, two next steps and two open items, is 65 tok
 sessions update it; only the log grows, and the log is not loaded. At its 60-line cap NOW
 would be about 600–900 tokens, and the gate warns before that. Phase 4 has to win the Read
 First cost back.
+
+## Phase 2: rules that are easy to get wrong, and lessons (1.6.0, unreleased)
+
+Read First gains one line about lessons (+30 tokens). The rules section appears only where
+the repository has a source for it. The branch pattern, CONTRIBUTING's merge rules and the
+CODEOWNERS line moved into it from Commit Standard and Boundaries, so each is said once.
+
+| Repository | Baseline | Phase 1 | Phase 2 | Change from baseline | Rules section | Read First |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| changesets/changesets | 1,911 | 2,026 | 2,094 | +183 | 62 (CODEOWNERS) | 146 |
+| psf/requests | 1,490 | 1,602 | 1,635 | +145 | 84 (CODEOWNERS) | 141 |
+| spf13/cobra | 1,506 | 1,618 | 1,647 | +141 | — | 141 |
+| BurntSushi/ripgrep | 1,701 | 1,813 | 1,843 | +142 | — | 141 |
+| google/gson | 1,696 | 1,808 | 1,838 | +142 | — | 141 |
+| terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,426 | 1,456 | +142 | — | 141 |
+| naso-dev | 1,670 | 1,782 | 1,812 | +142 | — | 141 |
+| field repository, as generated | 1,576 | 1,691 | 2,119 | +543 | 398 (4 decisions, 1 env template) | 144 |
+
+Median 1,670 → 1,812 (+8.5%). requests gained its rules section and still grew by only 33
+tokens from Phase 1, because the CODEOWNERS line left Boundaries. The field repository has
+49 recorded decisions; four of them, cut to one sentence each, are most of its 398 tokens.
+That is the section's ceiling in practice, and whether those four are the right four is
+for the review pass to settle.
+
+Every row has an empty NOW. (The cobra clone still held the 65-token sample NOW from
+Phase 1; it is left out here so the rows compare like for like.)

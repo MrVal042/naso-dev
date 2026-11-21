@@ -23,6 +23,7 @@ import path from 'node:path';
 import { parseArgs, pathExists, nasoCommand, isMainModule, toolVersion, run, documentedBranchPattern, SUPPORT_EMAIL } from './lib.mjs';
 import { AGENTS_FILE, NASO_START, NASO_END, blockEdited, listRepoFiles, scanRepo } from './scan.mjs';
 import { renderReadFirst } from './render.mjs';
+import { renderTraps, TRAPS_HEADING } from './traps.mjs';
 import { locateHandoff } from './handoff.mjs';
 import { checkBriefing } from './check.mjs';
 import { NASO_DIR } from './vendor.mjs';
@@ -183,7 +184,7 @@ async function repositoryNames(cwd) {
 
 /** Everything the prompt adapts to, read once. */
 /** How to write each SECTIONS_SINCE section from this repository as it is now. */
-const SECTION_RENDERERS = { 'Read First': renderReadFirst };
+const SECTION_RENDERERS = { 'Read First': renderReadFirst, [TRAPS_HEADING]: (facts) => renderTraps(facts.traps) };
 
 /**
  * The sections the block predates, each with the text NASO would write for it today, so the
@@ -261,7 +262,7 @@ function stateLines(state, cmd, here) {
     lines.push(
       `- The block has no ${section.heading} section (added in ${section.since}): ${section.why}. ` +
         (section.createFirst ? `Run \`${section.createFirst.command}${here}\` first, so \`${section.createFirst.file}\`, which it cites, exists. ` : '') +
-        'Add it inside the markers, right after the "What this is" line (after the title if there is none), as NASO would write it here today:\n\n' +
+        `Add it inside the markers, ${section.place}, as NASO would write it here today:\n\n` +
         `\`\`\`markdown\n${section.text}\n\`\`\``,
     );
   }

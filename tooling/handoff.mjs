@@ -75,10 +75,20 @@ async function gitPath(cwd, flag) {
  * Returns { root, file, archiveDir, where, shown }; `shown` is the path to print, relative
  * to the working tree root, with forward slashes.
  */
-export async function locateHandoff(cwd, { track } = {}) {
+/**
+ * The working tree root, `.naso/config.json`, and the git common directory (null outside
+ * git): what the handoff and the lessons both decide their location from.
+ */
+export async function repoContext(cwd) {
   const start = path.resolve(cwd);
   const root = (await gitPath(start, '--show-toplevel')) ?? start;
   const config = await readJSON(path.join(root, '.naso', 'config.json'));
+  const common = await gitPath(root, '--git-common-dir');
+  return { root, config, common };
+}
+
+export async function locateHandoff(cwd, { track } = {}) {
+  const { root, config, common } = await repoContext(cwd);
   const describe = (file, where) => ({
     root,
     file,
@@ -94,9 +104,30 @@ export async function locateHandoff(cwd, { track } = {}) {
   if (await pathExists(inRepo)) return describe(inRepo, 'repo');
   if ((track ?? config?.track) === true) return describe(inRepo, 'repo');
 
-  const common = await gitPath(root, '--git-common-dir');
   if (common) return describe(path.join(common, 'naso', 'HANDOFF.md'), 'git');
   return describe(inRepo, 'repo');
+}
+
+/**
+ * Where this repository's lessons are: { root, dir, index, where, shown }. Decided like the
+ * handoff, so the two always sit together:
+ *   repo — `.naso/lessons/`: it exists, .naso/ is committed, or this is not a git repository
+ *   git  — `<git common dir>/naso/lessons/`: kept local, shared by every worktree
+ * `index` is the README.md the briefing links; `shown` is `dir` relative to the root.
+ */
+export async function locateLessons(cwd, { track } = {}) {
+  const { root, config, common } = await repoContext(cwd);
+  const describe = (dir, where) => ({
+    root,
+    dir,
+    index: path.join(dir, 'README.md'),
+    where,
+    shown: toPosixPath(path.relative(root, dir)),
+  });
+  const inRepo = path.join(root, '.naso', 'lessons');
+  if (await pathExists(inRepo)) return describe(inRepo, 'repo');
+  if ((track ?? config?.track) === true || !common) return describe(inRepo, 'repo');
+  return describe(path.join(common, 'naso', 'lessons'), 'git');
 }
 
 /** A new handoff. Says how each part is kept, so a person or an agent with no NASO can use it. */

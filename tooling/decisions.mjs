@@ -127,6 +127,7 @@ export function parseDecision(file, text) {
     by: field(lines, 'Decided by|Deciders|Decider') ?? front.deciders ?? null,
     source: field(lines, 'Source|Decided in|Origin') ?? front.source ?? sectionFirstLine(lines, 'Sources?|References') ?? null,
     decision: sectionFirstLine(lines, 'Decision'),
+    why: ((value) => (value && !/^not recorded\.?$/i.test(value) ? value : null))(sectionFirstLine(lines, 'Why|Rationale|Reason')),
     applies: list(field(lines, 'Applies to|Scope') ?? front.applies),
     supersedes: list(field(lines, 'Supersedes')).map((item) => item.match(/(\d+)/)?.[1]).filter(Boolean).map(pad),
     reviewBy: field(lines, 'Review by|Revisit by|Review date') ?? front['review-by'] ?? null,

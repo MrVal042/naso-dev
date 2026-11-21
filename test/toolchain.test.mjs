@@ -181,10 +181,12 @@ test('setup derives the toolchain facts agents had to add by hand, each cited, a
     const checklist = sectionOf(text, 'Merge Request Checklist');
     assert.match(checklist, /- `\.gitlab\/merge_request_templates\/Default\.md` line 3: “Tests added or updated”/);
     assert.match(checklist, /line 5: “No secret in an EXPO_PUBLIC_ variable”/);
-    const commits = sectionOf(text, 'Commit Standard');
-    assert.match(commits, /Exception: `CONTRIBUTING\.md` line 8: “Revert messages are accepted as git writes them\.”/);
-    assert.match(commits, /Merging: `CONTRIBUTING\.md` line 12: “Merge requests are squashed when they merge\.”/);
-    assert.match(commits, /Approval: `CONTRIBUTING\.md` line 13: “Code owners may self-approve documentation changes\.”/);
+    // CONTRIBUTING's merge rules are quoted once, with their reason, among the traps.
+    const rules = sectionOf(text, 'Rules That Are Easy To Get Wrong');
+    assert.match(rules, /`CONTRIBUTING\.md` line 8: “Revert messages are accepted as git writes them\.” Why:/);
+    assert.match(rules, /`CONTRIBUTING\.md` line 12: “Merge requests are squashed when they merge\.” Why:/);
+    assert.match(rules, /`CONTRIBUTING\.md` line 13: “Code owners may self-approve documentation changes\.” Why:/);
+    assert.doesNotMatch(sectionOf(text, 'Commit Standard'), /line 12/, 'said once, not twice');
     const check = await script('briefing');
     assert.doesNotMatch(check.stdout, /WRONG|MISSING|UNCOVERED/, check.stdout);
     // A decision written outside a table is a candidate too.

@@ -28,6 +28,7 @@ import {
   plural,
 } from './scan.mjs';
 import { decisionsLead, KNOWN_DECISION_DIRS } from './decisions.mjs';
+import { renderTraps } from './traps.mjs';
 import { extractPathTokens } from './check.mjs';
 import { prettierLine, jestLine, frameworkRules, frameworkFilesLine } from './toolchain.mjs';
 
@@ -716,18 +717,7 @@ async function renderBoundaries(facts) {
     );
   }
 
-  const owners = facts.codeowners;
-  if (owners && (owners.entries.length > 0 || owners.fallback)) {
-    const shown = owners.entries.slice(0, 10).map((entry) => `${entry.pattern} → ${entry.owners.join(', ')}`);
-    if (owners.entries.length > 10) shown.push(`${owners.entries.length - 10} more`);
-    if (owners.fallback) shown.push(`everything else → ${owners.fallback.join(', ')}`);
-    const unmatched = owners.unmatched.length > 0
-      ? ` ${owners.unmatched.slice(0, 5).join(', ')} ${owners.unmatched.length === 1 ? 'matches' : 'match'} no tracked file yet.`
-      : '';
-    // Patterns are not backticked: a CODEOWNERS pattern is a glob or a prefix, not a claim
-    // that a path exists, and the unmatched ones are exactly the paths that do not.
-    lines.push(`**Owners.** \`${owners.path}\` asks for these reviewers: ${shown.join('; ')}.${unmatched}`);
-  }
+  // CODEOWNERS is stated once, in Rules That Are Easy To Get Wrong, with its reason.
 
   // The import aliases are stated once, under Code Conventions, with the files that declare
   // them; a second line here said the same thing in fewer words.
@@ -770,16 +760,10 @@ function renderCommitStandard(facts) {
   const history = facts.history ?? { count: 0 };
   const lines = [];
 
-  if (facts.branchPattern) {
-    lines.push(`- Branch names follow \`${facts.branchPattern.text}\` (\`${facts.branchPattern.source}\`); the hook warns on any other.`);
-  }
+  // The branch pattern and CONTRIBUTING's merge rules are in Rules That Are Easy To Get
+  // Wrong, each with its reason. Said here too, they cost every session twice.
   if (facts.contributing?.commits) {
     lines.push(`- \`${facts.contributing.path}\` writes the commit rules down; where it and this count differ, it wins.`);
-  }
-  // The merge mode, who may approve, and the exceptions to the commit rule: the lines an
-  // agent preparing a merge request gets wrong first, quoted where the guide says them.
-  for (const rule of facts.toolchain?.mergeRules ?? []) {
-    lines.push(`- ${rule.kind === 'merge mode' ? 'Merging' : rule.kind === 'approval' ? 'Approval' : 'Exception'}: \`${rule.file}\` line ${rule.line}: “${rule.text}”`);
   }
 
   const shape = dominantShape(history);
@@ -853,6 +837,18 @@ function renderDecisions(facts) {
  * the command that prints it, not by a path: the path is per machine, and an agent's file
  * tools are often kept out of .git.
  */
+/**
+ * The lessons index, linked, never the lessons: one line each there, read when it applies.
+ * A local index is named by the command that prints it, like the handoff.
+ */
+function lessonsLine(facts) {
+  const lessons = facts.lessons;
+  const record = `When a person corrects you or confirms an approach, record it: \`${nasoCommand()} lesson --title "…" --why "…" --apply "…"\`.`;
+  if (!lessons?.indexExists) return record;
+  const where = lessons.where === 'git' ? `\`${nasoCommand()} lessons\` prints the lessons index` : `Lessons from earlier sessions are indexed in \`${lessons.shown}/README.md\``;
+  return `${where}, one line each; read a lesson when its line applies. ${record}`;
+}
+
 export function renderReadFirst(facts) {
   const handoff = facts.handoff;
   const decisions = facts.decisions ?? {};
@@ -870,6 +866,8 @@ export function renderReadFirst(facts) {
     decisionsLine,
     '',
     `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`.`,
+    '',
+    lessonsLine(facts),
   ].join('\n');
 }
 
@@ -1144,6 +1142,11 @@ export async function renderBriefing(facts, { version, now }) {
       `- \`${nasoCommand()} review\` prints the full review: what to read, what to check, and what NASO can and cannot derive here. \`${nasoCommand()} briefing\` checks every path claim; run it after any edit to this block.`,
     ].join('\n'),
   );
+
+  // Right after how to correct the block, before anything long: the traps are the lines an
+  // agent most needs and most often skims past.
+  const traps = renderTraps(facts.traps);
+  if (traps) parts.push(traps);
 
   parts.push(renderDecisions(facts));
 

@@ -75,3 +75,50 @@ test('after the agent pastes what review gave it, the check passes with no notic
     assert.doesNotMatch(res.stdout, /NOTICES/);
   });
 });
+
+/** Set up a repository with a committed env template, then cut the rules section out. */
+async function oldShapeWithTraps(dir, git) {
+  await seedProject(dir, git);
+  await put(dir, '.env.example', 'API_URL=\n');
+  await git('add', '-A');
+  await git('commit', '-qm', 'env template');
+  await driveFlow(dir, { args: ['--yes', '--no-hook'] });
+  const text = await read(dir, 'AGENTS.md');
+  const start = text.indexOf('## Rules That Are Easy To Get Wrong');
+  const end = text.indexOf('\n## ', start + 1);
+  assert.ok(start !== -1 && end !== -1, 'the fresh block has the section');
+  await put(dir, 'AGENTS.md', text.slice(0, start) + text.slice(end + 1));
+}
+
+test('a block without the rules section gets a notice only when the repository has rules to state', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await oldShapeWithTraps(dir, git);
+    const res = await naso(['briefing', dir, 'check'], dir);
+    assert.equal(res.code, 0, res.stdout);
+    assert.match(res.stdout, /Rules That Are Easy To Get Wrong missing \(added in 1\.6\.0\)/);
+  });
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await driveFlow(dir, { args: ['--yes', '--no-hook'] });
+    const res = await naso(['briefing', dir, 'check'], dir);
+    assert.doesNotMatch(res.stdout, /Rules That Are Easy To Get Wrong missing/, 'nothing to state, nothing missing');
+  });
+});
+
+test('review gives the rules section to add, and after pasting it the check has no notice', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await oldShapeWithTraps(dir, git);
+    const prompt = (await naso(['review', dir], dir)).stdout;
+    assert.match(prompt, /no Rules That Are Easy To Get Wrong section \(added in 1\.6\.0\)/);
+    assert.match(prompt, /right after the "When This Block Is Wrong" section/);
+    const at = prompt.indexOf('## Rules That Are Easy To Get Wrong');
+    const section = prompt.slice(at, prompt.indexOf('\n```', at));
+    assert.match(section, /`\.env\.example` is committed/);
+    const text = await read(dir, 'AGENTS.md');
+    const where = text.indexOf('## Decisions');
+    await put(dir, 'AGENTS.md', `${text.slice(0, where)}${section.trim()}\n\n${text.slice(where)}`);
+    const res = await naso(['briefing', dir, 'check'], dir);
+    assert.equal(res.code, 0, res.stdout);
+    assert.doesNotMatch(res.stdout, /NOTICES/);
+  });
+});
