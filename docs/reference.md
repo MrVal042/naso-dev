@@ -1,0 +1,382 @@
+# NASO reference
+
+Everything NASO does, in detail. The [README](../README.md) is the short version.
+
+
+NASO (Never Assume, Scan Once) generates a truthful `AGENTS.md` from your repository and keeps it consistent with what actually exists. One command sets it up: it reads the repository, shows you the plan, asks, and then writes. It copies a small toolset in, installs a minimal pre-commit gate, and gives you `briefing`, `review`, `refresh`, `guide`, `validate`, `doctor` and `stats`; `decide`, `decisions`, `handoff`, `lesson` and `lessons` to carry what your team decided and learned from one session to the next; and the opt-in `claude`, `agents` and `workspace`. It has no dependencies, so installing it adds naso-dev and nothing else.
+
+The npm package is `naso-dev`, so every command below is `npx naso-dev <command>`.
+
+## Why
+
+An AI coding agent starts every session knowing nothing about your repository. Without a briefing it guesses at architecture and invents files. NASO writes that briefing by reading the repository, with no placeholders and no sections left to "fill later". The pre-commit hook keeps it true by refusing changes that leak secrets or go outside claimed scope, and by appending one line for a genuinely new area.
+
+## Requirements
+
+- Node.js 20 or newer
+- Git 2.30 or newer
+- A git repository
+
+## Quick Start
+
+One command, once per repository:
+
+```bash
+npx naso-dev@latest --save-dev
+```
+
+`--save-dev` records naso-dev in your project's `devDependencies`, never `dependencies`, as an exact version when the repository pins its versions (`save-exact` in `.npmrc`, a Renovate config that pins, or every dependency already exact): it is a development tool, so production installs and your app's build leave it out. In a repository without a `package.json` the flag does nothing. `@latest` makes npx fetch the current release instead of reusing an older copy it cached.
+
+It works like a guided installer. In order:
+
+1. **Reads** the repository and shows what it found: branch, files, areas, language.
+2. **Asks** what the plan depends on: commit the files or keep them local; the pre-commit hook, and what to do about a hook NASO did not write; whether to replace an existing NASO block; whether to record naso-dev in `devDependencies`.
+3. **Shows the plan** as an overview: what the briefing covers, what must pass, any warning, and one row per file it would write with its exact line count (the whole toolset is one row).
+4. **Asks once:** *Write these files and install the hook?* Accept, Show details, Reject, or Exclude an area.
+5. **Installs**, one ✓ line per step, verifies the briefing against the repository, and says what you have now.
+6. **Ends with a prompt for your coding agent**, which finishes the job: it checks the briefing against the rules your repository already wrote down, corrects it, and proposes the decisions your docs already made. `npx naso-dev review` prints it again at any time.
+
+- **Accept** writes `AGENTS.md`, links it from `CLAUDE.md` for Claude Code, vendors the toolset into `.naso/tooling/`, installs `.git/hooks/pre-commit`, and — unless you pass `--track` — keeps both `.naso/` and `AGENTS.md` out of git via `.git/info/exclude`. An `AGENTS.md` git already tracks cannot be excluded: only `.naso/` is, and the plan says the NASO block will show in `git status` as a change to commit or drop.
+- **Show details** prints every file one by one, what the briefing will say, and why each change is made, then asks again. It is not a rejection.
+- **Reject** writes nothing and reads the repository again. A second reject stops and offers to print a pre-filled support report; either way the repository is left byte-for-byte as it was.
+- **Exclude an area** keeps one top-level directory out of the briefing and shows the plan again.
+- **An existing `AGENTS.md` is never replaced.** The NASO block goes between `<!-- naso:start -->` and `<!-- naso:end -->`; everything outside those markers stays byte-identical.
+- **Nothing is written before the last answer.** Not the hook, not the config, not a half-written briefing.
+
+Arrow keys (or j/k) move between answers, Enter picks one, and y or n answers a yes/no question at once. Ctrl+C or Escape cancels at any question, and nothing is written.
+
+Add `--why` for the long-form rationale before you decide.
+
+### What you will see
+
+A first run in a NestJS API with a `package.json`, shortened. Your branch, counts and CI will differ.
+
+**1. It reads the repository.** npx asks once to download naso-dev, then NASO says what it found and what it is about to do. Nothing has been written yet.
+
+```text
+$ npx naso-dev@latest --save-dev
+Need to install the following packages:
+naso-dev@2.0.1
+Ok to proceed? (y) y
+
+NASO 2.0.1  /path/to/acme-api
+
+## This repository
+
+Branch            feature/bootstrap
+Files             136 tracked in the git index
+Areas             4 top-level directories (docs, openapi, src, test)
+Stack             A NestJS API service
+Language          TypeScript, 106 of 136 files
+
+What this does    reads this repository, writes an AGENTS.md briefing
+                  that says what every area is for and what must pass before
+                  work counts as done, then copies a small toolset into .naso/
+                  and installs a pre-commit gate to keep the briefing true.
+
+Before you accept nothing at all is written. Answering no leaves this
+                  repository exactly as it is, and that is a valid outcome.
+```
+
+**2. It asks what the plan depends on.** Enter takes the default.
+
+```text
+◇  Questions
+   Answer with Enter to accept the default. Nothing is written until you accept the plan.
+
+◇  Commit AGENTS.md and .naso/ to git? (No keeps them local to this machine.)
+   Yes
+
+◇  Install the pre-commit gate?
+   Yes
+```
+
+If `AGENTS.md` already has a NASO block, it also asks whether to replace it. Everything outside the markers is kept either way. Because `--save-dev` was passed, it does not ask about `devDependencies`.
+
+**3. It shows the plan and asks once.** Every file it would write, with its line count. `package.json` changes last, through your own package manager.
+
+```text
+The plan for acme-api  nothing is written until you accept
+
+  The briefing covers 4 areas: docs/, openapi/, src/, test/ from 136 files on feature/bootstrap.
+  What must pass: .gitlab-ci.yml (3 CI jobs)
+
+## Files this writes
+
+  AGENTS.md                new, 73 lines    (the briefing)
+  .naso/guides/conventions.md  new, 24 lines  (read when the block says so, not at session start)
+  .naso/guides/workflow.md     new, 31 lines  (read when the block says so, not at session start)
+  .naso/guides/decisions.md    new, 15 lines  (read when the block says so, not at session start)
+  CLAUDE.md                new, 1 line      (makes Claude Code load the briefing)
+  .naso/tooling/           new, 15134 lines (30 files; the hook runs this copy)
+  .naso/config.json        new, 8 lines     (the choices you made here)
+  .git/hooks/pre-commit    new, 47 lines    (the gate, on this machine)
+  .prettierignore          append 1 line
+  eslint.config.mjs        insert 2 lines
+  package.json             changed  (devDependencies, by npm, last)
+  package-lock.json        changed  (by npm, with node_modules/)
+
+  Last, `npm install --save-dev naso-dev@2.0.1`, the only step that uses the network.
+
+◆  Write these files and install the hook?
+   ● Accept (write exactly the files listed above)
+   ○ Show details
+   ○ Reject
+   ○ Exclude an area
+```
+
+**4. It writes, checks, and hands over to your coding agent.**
+
+```text
+## Accepted — writing
+
+✓ AGENTS.md: wrote the NASO block, 152 lines
+✓ CLAUDE.md: wrote `@AGENTS.md`, so Claude Code loads the briefing
+✓ .naso/tooling/: copied 30 files; the hook runs this copy, not the package
+✓ .naso/config.json: wrote the settings this run used
+✓ .prettierignore: added .naso/, so prettier --check leaves the toolset alone
+✓ eslint.config.mjs: added .naso/ to its ignores, so ESLint leaves the toolset alone
+✓ pre-commit hook: installed (.git/hooks/pre-commit)
+✓ git: .naso/ and AGENTS.md are yours to commit (--track)
+✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.1`
+
+## Verify
+
+Briefing is consistent with the repository: 38 path claim(s) verified, 4 top-level area(s) covered, no placeholders left.
+
+## What you have now
+
+- A briefing every coding agent that reads AGENTS.md starts from, with 38 path claims checked against this repository rather than written from memory.
+- Claude Code loads it through CLAUDE.md, so a session starts with it instead of rediscovering the repository.
+- Every commit on this machine is checked before it lands: secret-shaped lines, files outside NASO_SCOPE, format (with a Prettier config) and lint (with ESLint) on staged files, and a briefing line for any new top-level area. The briefing says which of those steps run in your repository.
+- The gate runs from .naso/tooling/ with no network and no package install.
+- Decisions survive the session: AGENTS.md tells every agent to read docs/decisions/README.md before proposing an approach, and to record what you decide with `npx naso-dev decide`.
+- naso-dev is in devDependencies: teammates get this version from an ordinary install, and production installs leave it out.
+- Commit AGENTS.md and .naso/ and every teammate gets the same briefing and the same gate (the hook itself is per machine).
+
+Later:
+
+  npx naso-dev briefing   re-check the briefing against the code
+  npx naso-dev review     this prompt again, with the state at that time
+  npx naso-dev guide      the guide for one area
+  npx naso-dev doctor     confirm the install end to end
+  npx naso-dev refresh    after upgrading: re-copy the toolset and re-stamp
+
+## Last step: hand this to your coding agent
+```
+
+It ends with a prompt to paste into your coding agent. The agent checks every claim in the NASO block against the rules your repository already wrote down, corrects or removes what is wrong, adds what an agent would otherwise get wrong, cites a file and line for every change, proposes the decisions your docs already made, and gives you a diff to review without committing. Its report ends with what NASO gives your repository, counted.
+
+`npx naso-dev review` prints that prompt again whenever you want it, built from the repository as it is then. It names the rule files your repository has, what `briefing` and `decisions audit` report today, and the decisions waiting for a person. On a second review it asks the agent to check what changed since the first one instead of starting over.
+
+### Adding it to a project
+
+`npx naso-dev --save-dev` is the whole install. With `--save-dev`, NASO runs your package manager (`npm install --save-dev`, `pnpm add --save-dev`, `yarn add --dev` or `bun add --dev`) as the last step, after everything else is written, so teammates get the same version from an ordinary install. If someone already ran `npm i naso-dev` and it landed in `dependencies`, it moves it to `devDependencies`. Without the flag, a terminal run asks **Add naso-dev to devDependencies?** (default yes); `--yes` alone never runs the package manager.
+
+Installing the package is not setup. `npm i naso-dev` runs nothing and asks nothing: there is no install script, so no questions, no `AGENTS.md`, no hook. It only adds the package, and without `-D` it adds it to `dependencies`. If you install it yourself, always do it as a dev dependency (`npm i -D naso-dev`, `pnpm add -D naso-dev`, `yarn add -D naso-dev` or `bun add -d naso-dev`), then run `npx naso-dev --save-dev` to set up.
+
+It belongs in `devDependencies` because nothing in your app imports it: a production install (`npm ci --omit=dev`) and your app's build leave it out. The pre-commit hook does not need it installed at all: it runs the copy in `.naso/tooling/`.
+
+Why not set up from `npm i naso-dev` itself: npm 7 and later run a package's install script with its output hidden and no terminal to answer from, pnpm and bun do not run it unless the project allows it, and npm writes `package.json` after the script has run. An install script would also run on every `npm ci` in CI and on every teammate's machine. One `npx` command does the same job without any of that.
+
+### Your package manager, not just npx
+
+Every command NASO prints for you to run is spelled for the package manager this repository uses: its `packageManager` field, then its lockfile, then the manager that launched NASO, then npm. A `packageManager` field with no lockfile of its own, beside another manager's lockfile, was never adopted, so the lockfile wins and the briefing says why.
+
+| Repository uses | naso-dev installed here | not installed |
+| --------------- | ----------------------- | ------------- |
+| npm             | `npx naso-dev`          | `npx naso-dev` |
+| pnpm            | `pnpm exec naso-dev`    | `pnpm dlx naso-dev` |
+| yarn 2+         | `yarn naso-dev`         | `yarn dlx naso-dev` |
+| yarn 1          | `yarn naso-dev`         | `npx naso-dev` (yarn 1 has no `dlx`) |
+| bun             | `bunx naso-dev`         | `bunx naso-dev` |
+
+The same goes for the dev dependency step, the upgrade hint `refresh` prints, and the message the pre-commit hook prints when its toolset is missing. The commands in AGENTS.md (`pnpm run lint`) already followed the repository's manager.
+
+### When it finishes
+
+Setup ends with two things, in this order:
+
+- **What you have now.** One line per thing the run actually did: how many path claims were checked, whether Claude Code loads the briefing, what the hook checks on this machine, where decisions are kept, whether naso-dev was recorded in `devDependencies`, and whether anything reached git history. Nothing that was skipped or failed is listed.
+- **A prompt for your coding agent**, printed last so it is the next thing to do, and built from this repository: it names the rule files it has (contributing guides, CODEOWNERS, review templates, CI, hooks, lint and format config, docs), what `briefing` and `decisions audit` report, and any version gap. The agent keeps, corrects or removes every line of the NASO block, adds what an agent would otherwise get wrong, cites a file and line for every change, and stays between the markers. It proposes the decisions your docs already made (the rows your docs mark Decided that no record cites yet, and "decided" lines in config, CONTRIBUTING and CODEOWNERS), never accepts one, runs every check-only tool your repository and CI use (lint, format check, typecheck, tests, and a secret scanner such as gitleaks if installed) on `.naso/` and the decisions folder, runs `npx naso-dev briefing`, leaves the git index as it found it, and does not commit. It records `HEAD` and `git write-tree` at the start and stops if another session changes either. Its report ends with what NASO gives this repository, counted, and a commit plan: the branch your rules require, the exact files to stage, staged files that are not NASO's, and a final "Ready to commit: yes" or "no" with the blockers.
+
+`npx naso-dev review` prints the same prompt later. On a block that was already reviewed, it asks the agent to check what changed since then instead of starting over; while the block is not committed yet, it asks for a full review instead, since there is no commit to diff from. A Decided row owned by another repository ("Decided (customer-api)") is listed apart, not as a decision to propose here. Proposed records are never listed among the repository's own rules; accepted ones are, under their own heading.
+
+`--yes` and `--dry-run` print the full plan instead of the overview, since nobody is there to ask for details.
+
+### Running it from a script
+
+With no terminal — piped, in CI, or run by an agent — it prints the plan, writes nothing, and exits **2**, so a script can tell "not done" from "done". `--dry-run` prints the same plan and exits 0. To accept the plan you just read, add `--yes`:
+
+```bash
+npx naso-dev --yes --save-dev
+```
+
+### `init` and `setup`
+
+The two commands this replaces still work, print one deprecation line naming `npx naso-dev`, and are no longer listed in `--help`. Existing scripts and CI jobs calling them keep working.
+
+## The block and its guides
+
+Every line in `AGENTS.md` is read at the start of every session, before the agent does any work. Most of a briefing is needed only for one kind of task: how commits are written matters when committing, a folder's source map when changing that folder, the decisions procedure when a decision comes up. So since 2.0.0 the NASO block keeps what every session needs, and a **When You Touch** table names the guide in `.naso/guides/` to read for each kind of task:
+
+| When you | Read first |
+| --- | --- |
+| write or change code | `.naso/guides/conventions.md` |
+| start editing, commit, or open a pull request | `.naso/guides/workflow.md` |
+| propose an approach, or before asking the person a question | `.naso/guides/decisions.md` |
+| change files under `src/` | `.naso/guides/src.md` |
+
+- **The block:** what the repository is, Read First (the handoff, then the guide for the task), the rules that are easy to get wrong, the areas, secrets, the validation commands and when the work is done. About 30 to 45 lines of text in the sample repositories; `briefing` gives a notice past 60.
+- **The guides:** conventions (code conventions, stack rules, boundaries), workflow (scope, the commit standard, the merge request checklist), decisions, and one per area whose folders a doc describes. A guide with nothing to say is not written, and the table has no row for it.
+- **Checked as one.** `npx naso-dev briefing` reads every guide the block links and checks its paths, quotes and claims as if they were in the block. A linked guide that is missing fails the check, even where `.naso/` is kept out of git.
+- **Edited like the block.** A guide people changed is kept by `--force` and replaced only with `--discard-edits`, after a backup.
+- **Gone:** file counts on every area line, and the list of every root file. `ls` gives both, fresh.
+
+What an agent loads at session start, in estimated tokens (`npx naso-dev stats`; [docs/benchmarks.md](benchmarks.md) has the method and every row):
+
+| | 1.5.4 | 1.6.0 | 2.0.0 |
+| --- | ---: | ---: | ---: |
+| Median of seven public and sample repositories | 1,670 | 1,812 | **849** (−49% from 1.5.4) |
+| A field repository, as generated | 1,576 | 2,115 | **1,214** |
+| The same repository, as its team reviewed it | 4,583 | — | **1,335** after `briefing migrate` |
+
+The guides cost nothing until a task needs one; `stats` lists them apart with their size.
+
+**A block from before 2.0.0** still passes `briefing`, with a notice. `npx naso-dev briefing migrate` shows how it splits, and `--write` moves each section into its guide word for word, every line people wrote in it included. A section NASO does not know stays in the block and is named, and a guide already on disk is never replaced. `review` tells the agent to migrate before anything else.
+
+## What the briefing says the repository is
+
+The briefing opens with one line, **What this is**, read from the manifests the repository has, in any ecosystem: package.json, pyproject.toml and requirements files, go.mod, Cargo.toml, Gemfile, pom.xml and Gradle, composer.json, pubspec.yaml. Every manifest counts, not only the root one, so a monorepo names each package by its own:
+
+> A pnpm monorepo (`pnpm-workspace.yaml`) of 2 packages: `apps/web/` is a Next.js web app; `services/api/` is a NestJS API service.
+
+Frameworks it names: Expo, React Native, Next.js, Nuxt, SvelteKit, Remix, Astro, Angular, Electron, NestJS, Fastify, Hono, Express, Vite, Django, FastAPI, Flask, Rails, Laravel, Symfony, Spring Boot, Flutter, and Go and Rust services and CLIs by their libraries. With none of those, the kind comes from the manifest itself: package.json `"bin"` is a command-line tool, `"exports"` or `"main"` a library, `src/main.rs` a Rust program. A repository with no manifest is told so, and no stack is named.
+
+**Stack Rules** follows, only when there are any. Every rule is checked against this repository before it is written: "every file under `src/app/` is a route" needs that folder and the router dependency; "ios/ and android/ are generated" needs `.gitignore` to ignore them; "`db/schema.rb` is generated" needs the file. A rule from one stack never appears in another's briefing. The table is in `tooling/stack.mjs`, one row per framework; adding a row changes no other.
+
+## Rules the repository already wrote down
+
+These work the same in any repository, and say nothing where the file is absent:
+
+- **Which Document Wins** comes first. A file people wrote wins over the NASO block, and every line in `CLAUDE.md`, `AGENTS.md` (outside the block), `CONTRIBUTING.md` or `README.md` that says which source wins is quoted with its file and line.
+- **When This Block Is Wrong** follows: an agent that finds a line the repository contradicts corrects it between the markers, citing the file, instead of working around it, and `npx naso-dev review` gives it the full review.
+- **Owners** lists CODEOWNERS paths with their reviewers, and names plain paths that match no tracked file yet.
+- **Source Map** lists every folder under the source root with its file count and the purpose the repository's own docs give it, cited. A folder no doc describes says so. Folders sharing a name at two depths (`src/auth/` and `src/features/auth/`) and folders a doc names that no longer exist are flagged.
+- **Branch names** follow the template the contributing guide writes down (`<type>/<KEY>-<n>-<slug>`), and the hook warns on any other branch. With no template, the hook only checks for a `prefix/name` shape.
+- **Generated files** name the script that writes them and the source it reads. Files a framework generates and git ignores (`.expo/`, `expo-env.d.ts`, `.next/`, `next-env.d.ts`…) are named with whether type-checking needs them.
+- **Merge Request Checklist** quotes every checkbox in `.gitlab/merge_request_templates/*.md` or `.github/pull_request_template.md`, with file and line.
+- **Commit Standard** quotes the merge mode (squash, fast-forward), who may approve, and the exceptions to the commit rule ("Revert messages are accepted") from the contributing guide.
+
+Every line quoted in “…” next to a `` `file` line N `` citation is checked: `npx naso-dev briefing` looks for the quote in the lines cited and reports a mismatch with the first differing word.
+
+## Toolchain facts
+
+Read from each tool's own config, never by running it, and said where an agent will look:
+
+- **Format:** the Prettier options set in `.prettierrc`, `prettier.config.*` or package.json `"prettier"` (quotes, trailing commas, width…).
+- **Jest:** the preset, `moduleNameMapper` mocks and setup files from package.json `"jest"` or `jest.config.*`.
+- **Expo:** the `runtimeVersion` policy and what it asks when native code changes, and the experiments that are on (`typedRoutes`, `reactCompiler`), from `app.config.*` or `app.json`.
+- **Metro:** a transformer such as `react-native-svg-transformer`, which makes an `.svg` import a component.
+
+The block leaves out what changes nothing an agent does: no language mix, no restatement of `.gitignore`, and nothing from one machine's `.git/info/exclude`.
+
+## Decisions: say it once
+
+A decision made in a meeting, a ticket, an email or a chat is lost to the next AI session, the next account and the next agent unless it is written where all of them look. NASO keeps each one in its own file, lists them all in the decisions folder's `README.md` (one line per decision, linked to its record), and gives the briefing only the rules and one link to that list, in the decisions guide the block routes to, so AGENTS.md stays the same size however many decisions a team makes.
+
+```bash
+npx naso-dev decide --title "Use REST for the customer API" \
+  --decision "The app calls only REST endpoints of customer-api." \
+  --why "One contract for web and mobile" \
+  --considered "GraphQL — no team owns a schema" \
+  --source "PO email, 2026-10-14" --by "product owner" --applies src/api/
+npx naso-dev decisions                 # list
+npx naso-dev decisions accept 0004     # a person accepts it
+npx naso-dev decisions supersede 0001 --by 0004
+npx naso-dev decisions audit           # what no longer holds; changes nothing
+```
+
+- **Where:** the folder the repository already uses for decision records (`docs/adr/`, `docs/decisions/`, an `.adr-dir`…), else `docs/decisions/`. Nygard and MADR records are read as they are.
+- **Agents propose, people accept.** `decide` writes `proposed`; only `accept` makes a decision binding, and the briefing tells agents never to run it themselves.
+- **Every record has a source**, by reference: "PO email, 2026-10-14", not the email.
+- **Say it once.** `decide` refuses a title that is already recorded unless the new record supersedes it, and warns when another record already cites the same line, whether by line, range (`lines 5-9`) or section (`docs/architecture.md section 2`). `--considered` keeps the options turned down, so no later session offers one again. Cite a doc as `--source "<file> line <n>"`.
+- **Short file names.** A long title is cut at the last hyphen before 50 characters, never mid-word.
+- **Every session uses them.** Read First sends the agent to the decisions for the paths it changes, and the decisions guide tells it to check the list before asking the person a question, and to record a decision made in the session before the session ends.
+- **Nothing is deleted.** The audit reports contradictions, missing sources, scopes that are gone, unsettled proposals and passed review dates; a person supersedes or rejects.
+- **One list, one link.** The list sits between `<!-- naso:decisions:start -->` and `<!-- naso:decisions:end -->` in the decisions folder's `README.md`, accepted first, then proposed, then rejected or superseded; anything the team writes around the markers is kept. These commands and the pre-commit hook refresh it, and the hook stages it with the records. AGENTS.md links to it and tells every agent to read it before proposing an approach, so Claude Code, Codex, Cursor or Copilot start from the same decisions in a new session, on a new account or on another machine.
+
+## What gets installed
+
+| Path                        | Purpose                                                                                          |
+| --------------------------- | ------------------------------------------------------------------------------------------------ |
+| `AGENTS.md`                 | The briefing, inside its `naso:start` / `naso:end` markers. Never overwritten outside them.     |
+| `.naso/guides/*.md`         | The detail behind the block, one guide per kind of task, read when the block's When You Touch table says so. Written with the block, checked with it, and kept like it when people edit one. |
+| `CLAUDE.md`                 | One `@AGENTS.md` line, so Claude Code (which reads `CLAUDE.md`, not `AGENTS.md`) loads the briefing. Written only when there is no `CLAUDE.md` or yours is untracked; a tracked one is left alone unless you pass `--track`, and setup says what to add. |
+| `.naso/tooling/*.mjs`       | A copy of the toolset, so the hook works with no network and no global install. Each file starts with `/* eslint-disable */`, so your lint rules do not apply to NASO's code. |
+| `.dockerignore`             | One `.naso/` line under its own comment, only when the file already exists, so a Docker build does not copy the toolset into the image. Docker does not read `.git/info/exclude`. |
+| `.prettierignore`           | One `.naso/` line, only in a repository that uses Prettier, so `prettier --check .` leaves the toolset alone. Prettier does not read `.git/info/exclude`. |
+| `eslint.config.*` or `.eslintignore` | `{ ignores: ['.naso/'] }` as the first entry of a flat config's exported array, in its own quote style, or one `.naso/` line in `.eslintignore` for a legacy config, so `eslint .` does not report the vendored files' `eslint-disable` headers as unused. A config NASO cannot place the line in is left alone, and the plan says what to add. |
+| `.naso/tooling/VERSION`     | The version that copy was vendored from — the briefing stamp is compared against it.             |
+| `.naso/config.json`         | Per-repository setup choices: `setupVersion` (the version setup ran with; `refresh` never rewrites it), the mode, and any areas you excluded. |
+| `.git/hooks/pre-commit`     | Runs the secret, scope, format and lint checks on staged files and keeps the briefing current.   |
+| `.git/info/exclude`         | Keeps `.naso/`, `AGENTS.md` and a `CLAUDE.md` NASO created untracked locally (default mode), except a file git already tracks. Use `--track` to version them. |
+
+The hook resolves `.naso/tooling/validate.mjs` from `git rev-parse --show-toplevel`, so it runs identically from a clone, from the npx cache, or from a teammate's machine that never installed the package. If the vendored script is ever missing, the hook prints one loud line and lets the commit through rather than failing silently.
+
+Git never copies `.git/hooks`, so a fresh clone has no hook. Where `.naso/` is committed, `npx naso-dev refresh` installs it, and at the version already vendored changes nothing else. The briefing and `doctor` name the same command.
+
+## Commands
+
+| Command                                                            | What it does                                                                                                     |
+| ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| `npx naso-dev [target] [options]`                                   | The setup flow: read, plan, ask, write. No TTY and no `--yes` prints the plan, writes nothing, exits 2.           |
+| `npx naso-dev briefing [target] [check\|create\|refresh\|migrate]`  | Verify `AGENTS.md` and the guides it links against disk (paths, areas, and the claims it can test), write the NASO block and its guides, or move the version stamps only. `migrate` shows how a block from before 2.0.0 splits into guides, and `migrate --write` moves the sections word for word. A block written before a section existed (Read First, 1.6.0) passes with a notice, and `review` says what to add. A reviewed block or guide is never replaced without `--discard-edits`. |
+| `npx naso-dev refresh [target]`                                     | Re-copy the toolset, re-stamp the briefing, reinstall the hook; on a fresh clone, the command that installs the hook. Refuses to move a newer toolset back without `--force`, and says when `package.json` records a different naso-dev, with the exact command in the right direction. Never rewrites other briefing prose or `.naso/config.json`. |
+| `npx naso-dev review [target]`                                     | Print the prompt for your coding agent, built from this repository as it is now: its rule files, the check, decisions waiting for a person, and whether the block was reviewed before. |
+| `npx naso-dev guide <area-or-prefix> [target]`                      | The guide for one area: its paths, its checks, its boundary rules, and a ready-to-paste `NASO_SCOPE`.            |
+| `npx naso-dev guide --list [target]`                                | The areas that exist, with their file counts. Unknown areas are an error, not an empty screen.                   |
+| `npx naso-dev guide --tour [target]`                                | The read-through: every section of the briefing in reading order, plus the consistency check.                    |
+| `npx naso-dev validate [target] [--staged] [--scope a,b] [--strict]` | The pre-commit gate, and the full CI run without `--staged`.                                                     |
+| `npx naso-dev decide --title … --source … --decision …`           | Record a decision the team made, as proposed, with where it was made. Also `--why`, `--considered` (repeatable), `--by`, `--applies`, `--supersedes <id>`, and `--accept` for the person who made it. |
+| `npx naso-dev decisions [accept\|reject\|supersede\|audit\|sync]` | List, settle or audit the recorded decisions. The audit changes nothing. |
+| `npx naso-dev doctor [target]`                                      | Environment and install diagnostics: Node, git, hook, vendored copy and the naso-dev package.json records, the version setup ran with, what the repository's ESLint prints for `.naso/`, briefing consistency, the Claude Code link, leftovers. |
+| `npx naso-dev handoff [set\|log\|done\|trim\|path] [target]`        | The handoff between sessions. With no subcommand: create it if missing, then print NOW. `set "…"` (or `--file <path>`, or `-` for stdin) replaces NOW, the one current state: where things stand, next steps, open items. `- [ ] …` and `- Waiting on …` lines in it get an id and never age out. A `set` that leaves one out carries it over and says so; only `done <id>` or `set --close <id,…>` closes one, and the log records it. A line with an open item's id updates that item. `log "…"` adds a dated line to the log below NOW; only the log ages out, past 14 days (`--days`) or 60 lines (`--max-lines`), into a monthly archive nothing reads at session start. `add` still works as `log`. With `--track` the handoff is `.naso/HANDOFF.md`; kept local it is under the git directory, so every worktree of a clone shares one. The gate warns, never blocks, when NOW is over 60 lines. |
+| `npx naso-dev lesson --title … --why … --apply … [--type …]`       | Record what a session learned: a correction, or an approach somebody confirmed. Writes one file per lesson (front matter `name`, `description`, `type` of feedback, project or reference; then **Why:** and **How to apply:**) and one line in the lessons index, which the briefing links; the lessons themselves are read only when their line applies. Kept beside the handoff: `.naso/lessons/` with `--track`, the git directory otherwise, shared by every worktree. A second lesson with the same title is refused. |
+| `npx naso-dev lessons [audit] [target]`                            | Print the lessons index. `audit` reports a lesson citing a path that no longer exists (an error, exit 1), and lessons that duplicate or contradict each other (warnings). It changes nothing. |
+| `npx naso-dev agents [cursor\|copilot\|gemini\|windsurf\|all] [target] [--track]` | Points other agents at AGENTS.md, one line in each one's own file, never a copy: `.cursor/rules/naso.mdc`, `.github/copilot-instructions.md`, `GEMINI.md` (with `@AGENTS.md`), `.windsurf/rules/naso.md`. Codex reads AGENTS.md itself. A file you keep is appended to inside naso markers; one that already names AGENTS.md is left alone; a tracked one is left alone unless `--track`, with the line to add. With no name, says which agents the repository uses and whether each loads AGENTS.md. |
+| `npx naso-dev workspace [folder] [--read-only repo,…] [--yes] [--dry-run] [--force]` | For a folder that holds several repositories and is not one. Writes, in the folder only and after you accept: an AGENTS.md table of the repositories (each one's briefing, default owners from CODEOWNERS, what this machine may write where a file or `--read-only` says so), the CLAUDE.md link, and a shared handoff in `.naso/HANDOFF.md` for work that spans repositories. Runs no git command in the folder and changes nothing inside a repository; each keeps its own block and handoff. |
+| `npx naso-dev claude [target] [--deny [--owners @a,@b] [--scope a,b]] [--hooks] [--skills]` | Claude Code extras, each opt-in. `--deny` writes `permissions.deny` Edit rules to `.claude/settings.local.json` (kept out of git) for every path outside your CODEOWNERS ownership, or outside `NASO_SCOPE`: GitHub, GitLab (sections, default owners) and Bitbucket patterns are read with gitignore semantics, last match wins, a pattern it cannot translate exactly denies nothing and is reported, and a folder is one rule only when nothing under it could ever be yours. `--hooks`: SessionStart prints the handoff's NOW and the briefing check; Stop reminds the agent once to update the handoff when files changed and it did not (exec form, no shell, exit 0 always; needs the vendored toolset). `--skills`: `naso-handoff`, `naso-pre-pr`, `naso-decide`, `naso-sweep` in `.claude/skills/`. Your own settings, rules and skills are kept. Deny rules cover Claude Code's file tools and the shell commands it recognises, not a script that writes files itself. |
+| `npx naso-dev stats [target] [--json]`                              | What an agent loads at session start, in estimated tokens (4 characters each): `CLAUDE.md` and every file it imports, `AGENTS.md`, and the handoff's NOW section, each counted once, with the largest sections, and the guides the block links listed apart, because they are read only when a task needs one. Reads only; needs no git and no manifest. The numbers NASO is held to are in [docs/benchmarks.md](benchmarks.md). |
+
+All commands accept `--help`. `init` and `setup` are retired but still run; both are covered by the test suite.
+
+## Options
+
+- `--track` — commit `.naso/` and `AGENTS.md` instead of excluding them locally.
+- `--no-hook` — do not install the pre-commit hook.
+- `--hook-action <install|chain|skip|abort>` — what to do when `.git/hooks/pre-commit` already exists and NASO did not write it, or when `core.hooksPath` points at a directory git tracks (husky's `.husky/`). `chain` moves the existing hook, unchanged, to `pre-commit.pre-naso` and NASO's hook runs it first. The default is `skip`: NASO never overwrites a hook it did not write, and never writes into a tracked hooks directory unless you choose to. In a terminal this is asked as a question instead.
+- `--exclude <prefix>` — keep an area out of the briefing. Repeatable. Saved to `.naso/config.json`.
+- `--no-ignore-files` — leave `.prettierignore`, `.dockerignore` and the ESLint config as they are. `review` then names the line each one needs.
+- `--agents cursor,copilot,gemini,windsurf` or `--agents all` — point other agents at AGENTS.md as part of setup (see `naso-dev agents`). In a terminal it is asked, with No as the default and the agents this repository is set up for offered first. Without it setup writes no pointer, and names each agent it detected.
+- `--claude-deny [--owners @a,@b]`, `--claude-hooks`, `--claude-skills` — write the Claude Code extras (see `naso-dev claude`) as part of setup. In a terminal each is asked, with No as the default; the deny question lists the owners CODEOWNERS names. Without them setup writes nothing under `.claude/`.
+- `--save-dev` — record naso-dev in `devDependencies` with this repository's package manager, as the last step. Asked as a question in a terminal; from a script, `--yes` alone never runs the package manager.
+- `--yes`, `-y` — accept without prompting (CI and scripts).
+- `--dry-run` — print the plan and stop. Writes nothing.
+- `--force` — regenerate an existing `naso:start` / `naso:end` block that nobody has edited. On a repository NASO already set up, `npx naso-dev --force` re-runs setup and regenerates the block; without it the run only reports what is installed. A block people corrected after NASO wrote it is kept, even with `--force`. It never touches anything outside the markers.
+- `--discard-edits` — replace a block people edited, too. The old block is saved under `.naso/backups/` first. Use it only when you mean to throw the corrections away.
+- `--why` — print the long-form rationale for adopting NASO.
+- `--no-color` — emit no escape codes, whatever the terminal or `FORCE_COLOR` says. `NO_COLOR` does the same, below this flag and above `FORCE_COLOR`.
+- `--color` — colour the output even when it is a pipe.
+
+Colour is on for a terminal and off for a pipe, which is why `npx naso-dev > plan.txt` gives you a readable file. Precedence, first match wins: `--no-color`, then `NO_COLOR`, then `FORCE_COLOR` (or `--color`; `FORCE_COLOR=0` means none), then whether the output is a terminal. npm sets `FORCE_COLOR` for the scripts it runs, so under `npm run` output may be coloured into a pipe; `NO_COLOR=1` or `--no-color` turns that off.
+
+## Running it without installing
+
+Every command is also a script you can run directly:
+
+```bash
+node <path-to-the-naso-dev-package>/bin/naso-dev.mjs
+```
+
+The path is wherever the package landed — a clone, `node_modules/naso-dev` after `npm i -D`, or the npx cache. `npx naso-dev ...` and `node .../bin/naso-dev.mjs ...` run exactly the same code.

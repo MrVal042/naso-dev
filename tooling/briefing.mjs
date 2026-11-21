@@ -54,14 +54,19 @@ import {
   AGENTS_FILE,
   NASO_END,
   NASO_START,
+  blockDigest,
   blockEdited,
   plural,
   scanRepo,
+  listRepoFiles,
+  areasOf,
+  topLevelEntries,
 } from './scan.mjs';
+import { migrateBlock, planGuides, writeGuides } from './guides.mjs';
 import {
   countPhrase,
   describeEntry,
-  renderBriefing,
+  renderLayers,
   renderRootFiles,
 } from './render.mjs';
 import {
@@ -72,6 +77,7 @@ import {
 export * from './scan.mjs';
 export * from './render.mjs';
 export * from './check.mjs';
+export * from './guides.mjs';
 
 export const EDITED_BLOCK_NOTE =
   `- ${AGENTS_FILE}: the NASO block was edited after NASO wrote it (or was written before\n` +
@@ -112,11 +118,12 @@ export async function createBriefing(cwd, { force = false, discardEdits = false,
       const existingLines = before === null ? 0 : before.split('\n').length;
 
       const facts = await scanRepo(cwd, { exclude });
-      const block = await renderBriefing(facts, { version, now });
+      const { block, guides } = await renderLayers(facts, { version, now });
 
       if (before === null) {
         await writeFile(agentsPath, block, 'utf8');
-        return { ok: true, appended: false, agentsPath, content: block, facts };
+        const written = await writeGuides(cwd, guides);
+        return { ok: true, appended: false, agentsPath, content: block, facts, guides: written };
       }
 
       const start = before.indexOf(NASO_START);
@@ -126,7 +133,8 @@ export async function createBriefing(cwd, { force = false, discardEdits = false,
         // No block of ours in the file: append one and keep every existing line.
         const appended = appendBlock(before, block);
         await writeFile(agentsPath, appended, 'utf8');
-        return { ok: true, appended: true, existingLines, agentsPath, content: appended, facts };
+        const written = await writeGuides(cwd, guides);
+        return { ok: true, appended: true, existingLines, agentsPath, content: appended, facts, guides: written };
       }
 
       if (!force) {
@@ -149,8 +157,10 @@ export async function createBriefing(cwd, { force = false, discardEdits = false,
       const replaced =
         before.slice(0, start) + block.trimEnd() + before.slice(end + NASO_END.length);
       await writeFile(agentsPath, replaced, 'utf8');
+      const written = await writeGuides(cwd, guides, { discardEdits });
       return {
         ok: true,
+        guides: written,
         appended: false,
         replacedBlock: true,
         backup,
@@ -168,6 +178,60 @@ export async function createBriefing(cwd, { force = false, discardEdits = false,
     },
   );
 
+  return outcome.ok ? outcome.value : { ok: false, reason: 'locked', holder: outcome.holder };
+}
+
+/**
+ * Split a block written before 2.0.0 into a root block and guides, word for word.
+ *
+ * Nothing is regenerated: each section moves with every line people wrote in it, and the
+ * root keeps what every session needs. A guide that is already on disk is never replaced;
+ * the run stops and says which. Without `write`, it only says what it would do.
+ */
+export async function migrateBriefing(cwd, { write = false } = {}) {
+  const agentsPath = path.join(cwd, AGENTS_FILE);
+  const outcome = await withLock(
+    cwd,
+    async () => {
+      const before = await readFile(agentsPath, 'utf8').catch(() => null);
+      if (before === null) return { ok: false, reason: 'missing' };
+      const start = before.indexOf(NASO_START);
+      const end = before.indexOf(NASO_END);
+      if (start === -1 || end < start) return { ok: false, reason: 'no-block' };
+
+      const edited = blockEdited(before);
+      const inner = before.slice(start + NASO_START.length, end);
+      const project = inner.match(/^#\s+(.+?)\s+—\s+Agent Instructions\s*$/m)?.[1] ?? path.basename(cwd);
+      const files = await listRepoFiles(cwd).catch(() => []);
+      const areas = areasOf(topLevelEntries(files ?? [])).map((entry) => entry.name);
+      const split = migrateBlock(inner, { project, areas, edited });
+      if (!split) return { ok: false, reason: 'layered' };
+
+      const planned = await planGuides(cwd, split.guides);
+      const taken = planned.filter((guide) => guide.change !== 'new' && guide.change !== 'unchanged');
+      if (taken.length > 0) return { ok: false, reason: 'guides-exist', taken: taken.map((guide) => guide.rel) };
+
+      let block = `${NASO_START}${split.root.startsWith('\n') ? '' : '\n'}${split.root}${NASO_END}`;
+      // An untouched block stays untouched: its digest follows the move. An edited one keeps
+      // the digest it had, so it still reads as edited.
+      if (!edited) block = block.replace(/^(<!--\s*digest:\s*)[0-9a-f]+(\s*-->)$/m, `$1${blockDigest(block)}$2`);
+      const after = before.slice(0, start) + block + before.slice(end + NASO_END.length);
+      const lines = (text) => text.split('\n').length;
+      const result = {
+        ok: true,
+        written: write,
+        agentsPath,
+        rootLines: { before: lines(before.slice(start, end)), after: lines(block) },
+        guides: split.guides.map((guide) => ({ rel: guide.rel, headings: guide.headings, lines: lines(guide.text) })),
+        kept: split.kept,
+      };
+      if (!write) return result;
+      await writeFile(agentsPath, after, 'utf8');
+      await writeGuides(cwd, split.guides);
+      return result;
+    },
+    { reason: 'split the AGENTS.md block into guides' },
+  );
   return outcome.ok ? outcome.value : { ok: false, reason: 'locked', holder: outcome.holder };
 }
 
@@ -190,7 +254,7 @@ export function readBriefingMarkerValue(content, field) {
 }
 
 /**
- * Move the `<!-- version: X -->` stamp, and nothing else in the file.
+ * Move the `<!-- version: X -->` stamp and say the refresh on the "Generated by NASO" line, and nothing else.
  *
  * Used by `refresh`, whose whole promise is that a briefing somebody spent twenty minutes
  * on survives a version bump. Only the stamp line is rewritten; every other byte is
@@ -217,9 +281,17 @@ export async function refreshBriefingStamp(cwd, { current } = {}) {
     return { ok: true, changed: false, agentsPath, version, previous: stamped };
   }
 
+  // The prose line says the same version; leaving it behind had the block contradict itself.
   await writeFile(
     agentsPath,
-    content.replace(/^<!--\s*version:\s*.+?\s*-->$/m, `<!-- version: ${version} -->`),
+    content
+      .replace(/^<!--\s*version:\s*.+?\s*-->$/m, `<!-- version: ${version} -->`)
+      // The original version and date stay: "Generated by NASO 1.5.1 on <a date before
+      // 1.5.1 existed>" was false. The refresh is said beside them.
+      .replace(
+        /^> Generated by NASO (\S+) on (\S+?)(?: \(refreshed to \S+ on \S+\))? from /m,
+        (_, first, date) => `> Generated by NASO ${first} on ${date} (refreshed to ${version} on ${new Date().toISOString().slice(0, 10)}) from `,
+      ),
     'utf8',
   );
   return { ok: true, changed: true, agentsPath, version, previous: stamped };
@@ -238,6 +310,8 @@ Usage:
   ${nasoCommand()} briefing [dir] create             write the NASO block into AGENTS.md
   ${nasoCommand()} briefing [dir] create --force     replace an existing naso:start/naso:end block
   ${nasoCommand()} briefing [dir] refresh            move the version stamp only
+  ${nasoCommand()} briefing [dir] migrate            show how a block from before 2.0.0 splits into guides
+  ${nasoCommand()} briefing [dir] migrate --write    do it: sections move word for word
 
 Never rewrites anything outside <!-- naso:start --> and <!-- naso:end -->.
 
@@ -254,7 +328,7 @@ export async function main(argv = process.argv.slice(2)) {
   }
 
   const [maybeCommand, ...rest] = positional;
-  const COMMANDS = new Set(['check', 'create', 'refresh']);
+  const COMMANDS = new Set(['check', 'create', 'refresh', 'migrate']);
 
   // The verb and the directory may come in either order. A positional that
   // matches a verb *and* names a directory that exists is a directory, so a repo
@@ -321,6 +395,37 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
 
+  if (command === 'migrate') {
+    const write = flags.has('write');
+    const result = await migrateBriefing(cwd, { write });
+    if (!result.ok) {
+      const why = {
+        missing: `No ${AGENTS_FILE} in ${cwd}. Run \`${nasoCommand()} setup\` first.`,
+        'no-block': `${AGENTS_FILE} has no naso:start / naso:end block; nothing of NASO's to split.`,
+        layered: `The block already links its guides; nothing to migrate.`,
+        'guides-exist': `These guides are already on disk and would be replaced: ${(result.taken ?? []).join(', ')}. Move them aside, or merge them into the block by hand first. Nothing was written.`,
+        locked: `${AGENTS_FILE} is locked by ${result.holder}; nothing was written.`,
+      }[result.reason];
+      console.log(`- ${why}`);
+      if (result.reason !== 'layered') process.exitCode = 1;
+      return;
+    }
+    banner('Briefing Migrate', result.agentsPath);
+    console.log(`${result.written ? 'Moved' : 'Would move'} these sections out of the block, word for word:`);
+    for (const guide of result.guides) console.log(`  ${guide.rel}: ${guide.headings.join(', ')} (${plural(guide.lines, 'line')})`);
+    console.log(`The block ${result.written ? 'went' : 'would go'} from ${plural(result.rootLines.before, 'line')} to ${plural(result.rootLines.after, 'line')}, with a ${'When You Touch'} table naming each guide.`);
+    if (result.kept.length > 0) console.log(`Left in the block, because NASO does not know where they belong: ${result.kept.join(', ')}. Move them into a guide by hand if only one kind of task needs them.`);
+    if (!result.written) {
+      console.log(`\nNothing was written. \`${nasoCommand()} briefing migrate --write\` does it.`);
+      return;
+    }
+    console.log('');
+    const verified = await checkBriefing(cwd);
+    printCheck(verified);
+    if (!verified.ok) process.exitCode = 1;
+    return;
+  }
+
   if (command === 'refresh') {
     const result = await refreshBriefingStamp(cwd);
     if (!result.ok) {
@@ -344,7 +449,7 @@ export async function main(argv = process.argv.slice(2)) {
       return;
     }
     console.log(`- Refreshed ${AGENTS_FILE} version stamp: ${result.previous} -> ${result.version}`);
-    console.log('  Briefing content untouched.');
+    console.log('  Noted the refresh on the "Generated by" line; nothing else in the briefing changed.');
     return;
   }
 

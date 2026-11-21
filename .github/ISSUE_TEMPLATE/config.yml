@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Reference documentation
+    url: https://github.com/MrVal042/naso-dev/blob/Dev/docs/reference.md
+    about: Every command, option and section of the briefing.

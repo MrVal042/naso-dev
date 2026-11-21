@@ -16,6 +16,8 @@ import {
   put,
   read,
   seedProject,
+  sectionOf,
+  readBriefing,
 } from './helpers.mjs';
 
 test('the tracked total equals the index, minus AGENTS.md, on a first --track run and every mode after', async () => {
@@ -27,13 +29,13 @@ test('the tracked total equals the index, minus AGENTS.md, on a first --track ru
     // First run with --track: AGENTS.md is not in the index yet, so nothing is subtracted.
     const first = await bare(['--yes', '--track']);
     assert.equal(first.code, 0, first.stdout + first.stderr);
-    assert.match(await read(dir, AGENTS), /from the 5 tracked files, excluding AGENTS\.md/);
+    assert.match(await readBriefing(dir), /from the 5 tracked files, excluding AGENTS\.md/);
 
     // Once it is committed it is in the index, and it is the one file subtracted.
     await git('add', '-f', AGENTS);
     await git('commit', '-qm', 'track the briefing', '--no-verify');
     await bare(['--yes', '--force']);
-    assert.match(await read(dir, AGENTS), /from the 5 tracked files, excluding AGENTS\.md/);
+    assert.match(await readBriefing(dir), /from the 5 tracked files, excluding AGENTS\.md/);
   });
 });
 
@@ -46,8 +48,8 @@ test('the staging rule follows git, not the flag: --track with AGENTS.md ignored
 
     const res = await bare(['--yes', '--track']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
-    assert.match(text, /This file is not in the index and never will be/, 'an ignored file gets the local rule');
+    const text = await readBriefing(dir);
+    assert.match(text, /AGENTS\.md and \.naso\/ are not in the index and never will be/, 'an ignored file gets the local rule');
     assert.ok(!/stages it with the commit/.test(text));
   });
 });
@@ -56,7 +58,7 @@ test('a first --track run gets the tracked staging rule, because the file is abo
   await withRepo(async ({ dir, git, bare }) => {
     await seedProject(dir, git);
     await bare(['--yes', '--track']);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /stages it with the commit/);
     assert.equal((await git('check-ignore', '-q', AGENTS)).code, 1, 'and git agrees it is not ignored');
   });
@@ -71,7 +73,7 @@ test('outside a git repository the header admits the counts came from a filesyst
     const res = await exec(process.execPath, [BIN, 'setup', dir, '--yes'], dir);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /not a git repository/);
     assert.match(text, /filesystem walk/);
   } finally {
@@ -87,13 +89,13 @@ test('an excluded AGENTS.md is local-only, with no staging rule to follow', asyn
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(
       text,
-      /- This file is not in the index and never will be: it is local to this machine/,
+      /- AGENTS\.md and \.naso\/ are not in the index and never will be: they are local to this\n\s+machine/,
     );
     assert.match(text, /excluded through \.git\/info\/exclude so setup leaves no trace/);
-    assert.match(text, /Do\n\s+not stage it, do not `git add -f` it/);
+    assert.match(text, /Do not stage them, do not `git add -f` them/);
     assert.ok(
       !/staged with the commit/.test(text),
       'a rule about staging a line cannot apply to a file that is never committed',
@@ -111,12 +113,12 @@ test('a tracked AGENTS.md keeps the staging rule, because it is reviewable', asy
     const res = await script('setup', ['--yes', '--track']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(
       text,
       /- When a commit adds a genuinely new area, the hook appends one line for it/,
     );
-    assert.match(text, /stages it with the commit\. This file is tracked/);
+    assert.match(text, /stages it with the commit\. AGENTS\.md and \.naso\/guides\/\n\s+are tracked/);
     assert.ok(!/never will be/.test(text), 'a tracked file is not local-only');
   });
 });
@@ -126,12 +128,18 @@ test('extractPathTokens pulls backtick-quoted paths', () => {
   assert.deepEqual(new Set(tokens), new Set(['src/foo.ts', 'docs/guide.md']));
 });
 
+test('extractPathTokens leaves import-alias prefixes alone', () => {
+  // In the field, "`@/` resolves to the repository root" was reported as MISSING: @/.
+  const tokens = extractPathTokens('`@/` resolves to the root, so `@/src/lib/utils` and `~/components` are imports; `src/lib/utils.ts` is a file.');
+  assert.deepEqual(tokens, ['src/lib/utils.ts']);
+});
+
 test('createBriefing on a repository with no AGENTS.md writes the markers', async () => {
   await withRepo(async ({ dir, git }) => {
     await seedProject(dir, git);
     const result = await createBriefing(dir);
     assert.ok(result.ok);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(text.includes(NASO_START));
     assert.ok(text.includes(NASO_END));
     assert.equal(readBriefingMarkerValue(text, 'version'), await toolVersion());
@@ -148,7 +156,7 @@ test('createBriefing appends below a hand-written AGENTS.md and changes none of 
     assert.ok(result.ok);
     assert.ok(result.appended);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(text.startsWith(mine), 'the hand-written part must be byte-identical at the top');
     assert.ok(text.includes(NASO_START));
     assert.ok(text.includes('Line one, mine.'));
@@ -183,7 +191,7 @@ test('createBriefing --force replaces only what is between the markers', async (
     const kept = await createBriefing(dir, { force: true });
     assert.equal(kept.ok, false);
     assert.equal(kept.reason, 'edited');
-    assert.match(await read(dir, AGENTS), /stale generated content/);
+    assert.match(await readBriefing(dir), /stale generated content/);
 
     const result = await createBriefing(dir, { force: true, discardEdits: true });
     assert.ok(result.ok);
@@ -205,33 +213,40 @@ test('refreshBriefingStamp moves the stamp forward and never down', async () => 
 
     const up = await refreshBriefingStamp(dir, { current: '99.0.0' });
     assert.equal(up.changed, true);
-    assert.equal(readBriefingMarkerValue(await read(dir, AGENTS), 'version'), '99.0.0');
+    assert.equal(readBriefingMarkerValue(await readBriefing(dir), 'version'), '99.0.0');
 
     const down = await refreshBriefingStamp(dir, { current: '1.0.0' });
     assert.equal(down.changed, false, 'a newer stamp must not be downgraded');
-    assert.equal(readBriefingMarkerValue(await read(dir, AGENTS), 'version'), '99.0.0');
+    assert.equal(readBriefingMarkerValue(await readBriefing(dir), 'version'), '99.0.0');
   });
 });
 
-test('refreshBriefingStamp rewrites only the stamp line', async () => {
+test('refreshBriefingStamp rewrites only the two version stamps', async () => {
   await withRepo(async ({ dir, git }) => {
     await seedProject(dir, git);
     await createBriefing(dir);
     await writeFile(
       path.join(dir, AGENTS),
-      (await read(dir, AGENTS)).replace('Project Structure', 'My hand-edited heading'),
+      (await readBriefing(dir)).replace('Project Structure', 'My hand-edited heading'),
       'utf8',
     );
-    const before = (await read(dir, AGENTS))
+    const before = (await readBriefing(dir))
       .split('\n')
-      .filter((l) => !l.startsWith('<!-- version:'));
+      
+      .filter((l) => !l.startsWith('<!-- version:') && !l.startsWith('> Generated by NASO '));
 
     await refreshBriefingStamp(dir, { current: '42.0.0' });
 
-    const after = (await read(dir, AGENTS))
+    const after = (await readBriefing(dir))
       .split('\n')
-      .filter((l) => !l.startsWith('<!-- version:'));
+      
+      .filter((l) => !l.startsWith('<!-- version:') && !l.startsWith('> Generated by NASO '));
     assert.deepEqual(after, before, 'refresh touched more than the stamp');
+    assert.match(
+      await readBriefing(dir),
+      /^> Generated by NASO \S+ on \d{4}-\d{2}-\d{2} \(refreshed to 42\.0\.0 on \d{4}-\d{2}-\d{2}\) from /m,
+      'the original version and date stay, and the refresh is said beside them',
+    );
   });
 });
 
@@ -252,7 +267,7 @@ test('the NASO block is still checked when it sits below hand-written text', asy
     await seedProject(dir, git);
     await put(dir, AGENTS, '# Ours\n\nHand-written.\n');
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     await put(dir, AGENTS, text.replace(NASO_END, `- \`gone/nowhere.ts\` — claimed.\n\n${NASO_END}`));
     const check = await script('briefing');
     assert.notEqual(check.code, 0);
@@ -270,7 +285,7 @@ test('a long warning names a few paths and counts the rest, in AGENTS.md and on 
 
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     for (const out of [text, res.stdout]) {
       assert.match(out, /12 tracked test files are outside it/);
       assert.match(out, /and 7 more/);
@@ -291,7 +306,7 @@ test('the commit standard is read from history: conventional subjects are stated
     await seedProject(dir, git);
     await commitAll(git, dir, ['feat: a', 'fix(api): b', 'fix: c', 'docs: d', 'chore: e', 'test: f']);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     // One of six has a scope, so the form stated is the one the other five use.
     assert.match(text, /`type: summary`/);
     assert.match(text, /fix, chore, docs, feat, test/);
@@ -301,7 +316,7 @@ test('the commit standard is read from history: conventional subjects are stated
     await seedProject(dir, git);
     await commitAll(git, dir, ['Added login', 'wip', 'More stuff', 'Fix the thing', 'Update readme', 'tweaks']);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /type\(scope\)/);
   });
 });
@@ -310,7 +325,7 @@ test('the briefing carries no rules it cannot ground in the repository', async (
   await withRepo(async ({ dir, git, bare }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /Inventory first/);
     assert.doesNotMatch(text, /## Final Response Expectations/);
     assert.match(text, /`npm run lint`/, 'the closing note names the command this repository declares');
@@ -338,6 +353,69 @@ test('an untouched NASO block is replaced by --force; one edited in review is ke
     await writeFile(path.join(dir, AGENTS), fresh.replace('## Project Structure', '## Project Structure\n\nThe entry point is `package.json`, per review.'), 'utf8');
     const kept = await createBriefing(dir, { force: true });
     assert.equal(kept.reason, 'edited');
-    assert.match(await read(dir, AGENTS), /per review/);
+    assert.match(await readBriefing(dir), /per review/);
+  });
+});
+
+test('the Scope section says which hook steps run in this repository', async () => {
+  // In the field the block said the hook "checks staged files for secret-shaped lines, scope,
+  // format and lint" in a repository with no Prettier config and no ESLint, where both skip.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { lint: 'tsc --noEmit' }, devDependencies: { typescript: '~5.8.2' } }));
+    await git('add', '-A');
+    await git('commit', '-qm', 'no eslint');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const scope = sectionOf(await readBriefing(dir), 'Scope');
+    assert.doesNotMatch(scope, /scope, format\s+and lint/);
+    assert.match(scope, /Its format and lint steps skip here: there is no Prettier config and no ESLint\./);
+  });
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { lint: 'eslint .' }, devDependencies: { eslint: '^9.0.0', prettier: '^3.0.0' } }));
+    await put(dir, '.prettierrc', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'tools');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const scope = sectionOf(await readBriefing(dir), 'Scope');
+    assert.match(scope, /secret-shaped lines, scope, format \(Prettier\) and lint \(ESLint\)/);
+  });
+});
+
+test('an area line carries no file count, which an agent never used and every commit made stale', async () => {
+  // In the field the block said "docs/ — documentation; 10 files." and the first review's
+  // decide calls made it 19 before the block was even committed. `ls` gives a fresh count.
+  const { describeEntry } = await import('../tooling/render.mjs');
+  const line = describeEntry({ name: 'docs', isDir: true, files: ['docs/a.md', 'docs/b.md', 'docs/decisions/README.md', 'docs/decisions/0001-x.md'] });
+  assert.equal(line, '- `docs/` — documentation.');
+  const withEntry = describeEntry({ name: 'src', isDir: true, files: ['src/main.ts'], entryPoint: 'src/main.ts' });
+  assert.match(withEntry, /; entry `src\/main\.ts`\.$/);
+  assert.ok(!/\bfiles?\b/.test(withEntry), withEntry);
+});
+
+test('a TypeScript range is stated as the range package.json declares', async () => {
+  // In the field "~5.8.2" was rendered as "TypeScript 5.8.2" with 5.8.3 installed.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', devDependencies: { typescript: '~5.8.2' } }));
+    await put(dir, 'tsconfig.json', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'ts');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const text = await readBriefing(dir);
+    assert.match(text, /TypeScript ~5\.8\.2 \(package\.json range\), tsconfig\.json present/);
+  });
+});
+
+test('the never-exit line agrees in number with the scripts it names', async () => {
+  // In the field: "`pnpm run dev` never exit (…); do not run them as checks."
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', scripts: { dev: 'vite --port=3000', build: 'vite build' } }));
+    await put(dir, 'package-lock.json', '{}\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'dev');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    assert.match(await readBriefing(dir), /`npm run dev` never exits \(`vite --port=3000`\); do not run it as a check\./);
   });
 });

@@ -24,7 +24,7 @@ A test that never failed proves nothing about the bug it claims to cover.
 ## Getting set up
 
 ```bash
-git clone https://github.com/MrVal042/.naso.git && cd .naso
+git clone https://github.com/MrVal042/naso-dev.git && cd naso-dev
 npm test
 ```
 
@@ -36,7 +36,8 @@ step: NASO has no dependencies, and the tests use `node:test`.
 - `npm test` passes, all of it.
 - One behavior change per commit, with a message that says what was false before.
 - No unrelated reformatting. If you need to reformat, do it in its own commit.
-- If you changed what a command prints, update `README.md` in the same commit.
+- If you changed what a command prints, update `docs/reference.md` in the same commit, and
+  `README.md` if the short version says it.
 
 ## House style
 

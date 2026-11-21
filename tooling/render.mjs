@@ -23,13 +23,27 @@ import {
   SCRIPT_DELEGATES_TO,
   TEMPLATE_HEADER,
   blockDigest,
-  languageMix,
   readIgnorePatterns,
-  readLocalExcludes,
   roleFor,
   plural,
 } from './scan.mjs';
-import { indexFileOf } from './decisions.mjs';
+import { decisionsLead } from './decisions.mjs';
+import { renderTraps } from './traps.mjs';
+import { TOPICS, TOUCH_HEADING, areaGuideName, guideRel, renderGuide, renderTouchTable } from './guides.mjs';
+import { extractPathTokens } from './check.mjs';
+import { prettierLine, jestLine, frameworkRules, frameworkFilesLine } from './toolchain.mjs';
+
+/**
+ * A token in backticks when the checker will accept it: not a path at all (`jest-expo`,
+ * `\.svg$`), or a path the repository has. A path it does not have is written bare, so a
+ * module name that looks like a path is not reported as MISSING.
+ */
+const codeIfSafe = (facts) => (token) => {
+  const value = String(token);
+  if (extractPathTokens(`\`${value}\``).length === 0) return `\`${value}\``;
+  const dir = value.endsWith('/') ? value : `${value}/`;
+  return facts.files.includes(value) || facts.files.some((file) => file.startsWith(dir)) ? `\`${value}\`` : value;
+};
 
 // ---------------------------------------------------------------------------
 // Rendering
@@ -307,74 +321,41 @@ function renderTests(facts) {
 }
 
 /**
- * "61 files, 2 of them Kotlin" — the size of an area, and the language that
- * actually appears in it.
+ * One line per area: what it is, and how to get in.
  *
- * Deliberately counts *code* files separately from total files rather than
- * rounding to a percentage. `android/` in a React Native project is 2 Kotlin
- * files and 59 resources; "mostly Kotlin (3%)" would be arithmetic dressed up as
- * a description, and "all 2 files are Kotlin" would be a lie about 61.
- */
-function fileCountSentence(entry) {
-  const total = entry.files.length;
-  const language = entry.language;
-
-  if (!language || language.total === 0) return plural(total, 'file');
-  if (language.total === total) {
-    return total === 1 ? `1 file, ${language.label}` : `all ${plural(total, 'file')} are ${language.label}`;
-  }
-  return `${plural(total, 'file')}, ${language.total} of them ${language.label}`;
-}
-
-/**
- * One line per area: what it is, how big it is, and how to get in.
- *
- * The counts and the entry point are what make the line worth keeping — they go
- * stale visibly, whereas "this is where the app lives" does not. When neither the
- * name nor a manifest says what the area is for, the line says so rather than
- * guessing, because a wrong purpose is the one error an agent cannot detect on
- * its own and will confidently build on.
+ * When neither the name nor a manifest says what the area is for, the line says so rather
+ * than guessing, because a wrong purpose is the one error an agent cannot detect on its own
+ * and will confidently build on.
  */
 export function describeEntry(entry) {
   const label = entry.isDir ? `${entry.name}/` : entry.name;
   const role = entry.role ?? roleFor(entry.name);
 
-  const facts = [fileCountSentence(entry)];
-  if (entry.testFiles > 0) facts.push(`${plural(entry.testFiles, 'test file')}`);
+  // No file counts: an agent never used one, and `ls` gives a fresh one for free.
+  const facts = [];
   if (entry.manifest) facts.push(`manifest \`${entry.isDir ? `${entry.name}/` : ''}${entry.manifest}\``);
   if (entry.entryPoint) facts.push(`entry \`${entry.entryPoint}\`${entry.entrySource ? ` (${entry.entrySource})` : ''}`);
 
   const responsibility = role ?? 'role not derivable from its name or a manifest';
-  return `- \`${label}\` — ${responsibility}; ${facts.join('; ')}.`;
+  return `- \`${label}\` — ${responsibility}${facts.length > 0 ? `; ${facts.join('; ')}` : ''}.`;
 }
 
-/** Root files as one wrapped list rather than a dozen one-line entries. */
+/** Which root file starts the program, when a manifest says so or a name suggests it; null otherwise. */
 export function renderRootFiles(entries, facts = null) {
+  // The names themselves are left out: `ls` lists them, and the list was the longest line in
+  // most blocks. What `ls` cannot say is which one starts the program.
   const roots = entries.filter((entry) => !entry.isDir);
   if (roots.length === 0) return null;
 
-  const names = roots.map((entry) => `\`${entry.name}\``).join(', ');
-  const withEntries = roots
-    .filter((entry) => entry.entryPoint)
-    .map((entry) => `\`${entry.name}\``)
-    .join(', ');
-
-  const manifestEntry = facts.manifestEntryPoints[0] ?? null;
-
+  const manifestEntry = facts?.manifestEntryPoints?.[0] ?? null;
   if (manifestEntry && entries.some((entry) => entry.entryPoint === manifestEntry.value)) {
     // package.json names the entry point; that is a fact. A file called index.js is a guess.
-    return (
-      `Root files, none of which is an area of its own: ${names}.\n` +
-      `The entry point is \`${manifestEntry.value}\` — package.json "${manifestEntry.field}".`
-    );
+    return `The entry point is \`${manifestEntry.value}\` — package.json "${manifestEntry.field}".`;
   }
 
-  return (
-    `Root files, none of which is an area of its own: ${names}.` +
-    (withEntries
-      ? `\n${facts?.pkg ? 'package.json declares no entry point' : 'No manifest declares an entry point'}; ${withEntries} ${roots.filter((e) => e.entryPoint).length === 1 ? 'is' + ' named for one' : 'are named like one'}, which is a filename guess.`
-      : '')
-  );
+  const guessed = roots.filter((entry) => entry.entryPoint).map((entry) => `\`${entry.name}\``);
+  if (guessed.length === 0) return null;
+  return `${facts?.pkg ? 'package.json declares no entry point' : 'No manifest declares an entry point'}; ${guessed.join(', ')} ${guessed.length === 1 ? 'is named for one' : 'are named like one'}, which is a filename guess.`;
 }
 
 /**
@@ -468,18 +449,8 @@ function renderConventions(facts) {
   const { conventions, packageManager } = facts;
   const lines = [];
 
-  // AGENTS.md is left out here as it is everywhere else the header says it is, and the
-  // total is every file with an extension: summing only the four shown made a number
-  // nobody could reproduce.
-  const all = languageMix(facts.files.filter((file) => file !== 'AGENTS.md'));
-  const mix = all.slice(0, 4);
-  if (mix.length > 0) {
-    const total = all.reduce((sum, item) => sum + item.count, 0);
-    lines.push(
-      `Language mix: ${mix.map((item) => `${item.label} ${item.count}`).join(', ')}` +
-        ` (of ${total} files with an extension).`,
-    );
-  }
+  // No language mix: counts of files by extension changed no agent's next step, and every
+  // review removed the line.
 
   // A repository with no package.json has no Node package manager, and naming npm there
   // ("from no package.json, no lockfile") told a Python project every command used npm.
@@ -498,7 +469,9 @@ function renderConventions(facts) {
   if (conventions.moduleSystem) lines.push(`Modules: ${conventions.moduleSystem}.`);
 
   if (conventions.typescript) {
-    const parts = [`TypeScript ${conventions.typescript.version.replace(/^[\^~]/, '')}`];
+    // A range is not a version: "~5.8.2" stated as "5.8.2" read as exact while 5.8.3 was installed.
+    const declared = String(conventions.typescript.version);
+    const parts = [`TypeScript ${declared}${/^[\^~><=]|\s|\|\||x|\*/.test(declared) ? ' (package.json range)' : ''}`];
     parts.push(conventions.typescript.hasTsconfig ? 'tsconfig.json present' : 'no tsconfig.json');
     if (conventions.typescript.hasTsconfig) {
       parts.push(conventions.typescript.strict ? '"strict": true' : '"strict" is not set');
@@ -511,9 +484,13 @@ function renderConventions(facts) {
   }
 
   if (conventions.eslintConfig) lines.push(`Lint: ESLint configured by \`${conventions.eslintConfig}\`.`);
-  if (conventions.prettierConfig) {
+  const toolchain = facts.toolchain ?? {};
+  if (toolchain.prettier) {
+    lines.push(prettierLine(toolchain.prettier, codeIfSafe(facts)));
+  } else if (conventions.prettierConfig) {
     lines.push(`Format: Prettier configured by \`${conventions.prettierConfig}\`.`);
   }
+  if (toolchain.jest) lines.push(jestLine(toolchain.jest, codeIfSafe(facts)));
 
   const aliases = conventions.aliases?.declared ?? [];
   if (aliases.length > 0) {
@@ -526,7 +503,8 @@ function renderConventions(facts) {
         .join(', ');
       const gap =
         entry.absent.length > 0 ? ` — ${entry.absent.join(', ')} does not declare it` : '';
-      return `${entry.alias} → ${entry.targets.join(', ')} (${where}${gap})`;
+      const targets = entry.targets.map((target) => (target === '.' ? 'the repository root' : target));
+      return `${entry.alias} → ${targets.join(', ')} (${where}${gap})`;
     });
     lines.push(`Import aliases: ${rendered.join('; ')}.`);
 
@@ -684,6 +662,8 @@ async function renderBoundaries(facts) {
     );
   }
 
+  if (facts.toolchain?.frameworkFiles?.length > 0) lines.push(frameworkFilesLine(facts.toolchain.frameworkFiles, codeIfSafe(facts)));
+
   // In the repository's own words, from the comment above the pattern. Paths written by a
   // script are already named above; this adds the ones only the comment explains.
   const noted = (facts.ignoreNotes ?? []).filter((entry) => !generated.some((g) => g.path === entry.path));
@@ -699,38 +679,10 @@ async function renderBoundaries(facts) {
     );
   }
 
-  const owners = facts.codeowners;
-  if (owners && (owners.entries.length > 0 || owners.fallback)) {
-    const shown = owners.entries.slice(0, 10).map((entry) => `${entry.pattern} → ${entry.owners.join(', ')}`);
-    if (owners.entries.length > 10) shown.push(`${owners.entries.length - 10} more`);
-    if (owners.fallback) shown.push(`everything else → ${owners.fallback.join(', ')}`);
-    const unmatched = owners.unmatched.length > 0
-      ? ` ${owners.unmatched.slice(0, 5).join(', ')} ${owners.unmatched.length === 1 ? 'matches' : 'match'} no tracked file yet.`
-      : '';
-    // Patterns are not backticked: a CODEOWNERS pattern is a glob or a prefix, not a claim
-    // that a path exists, and the unmatched ones are exactly the paths that do not.
-    lines.push(`**Owners.** \`${owners.path}\` asks for these reviewers: ${shown.join('; ')}.${unmatched}`);
-  }
+  // CODEOWNERS is stated once, in Rules That Are Easy To Get Wrong, with its reason.
 
-  const declared = conventions.aliases?.declared ?? [];
-  if (declared.length > 0) {
-    lines.push(
-      // The mapping only. Whether this repository prefers the alias over a relative path is
-      // a rule in its docs or its lint config, and NASO reads neither; "a relative import is
-      // the one mistake TypeScript will not catch" was a rule nobody here had written.
-      `**Import aliases.** ${declared.map((entry) => `${entry.alias} → ${entry.targets.join(', ')}`).join('; ')}.`,
-    );
-    if (conventions.aliases.files.length > 1) {
-      const missing = conventions.aliases.divergent;
-      lines.push(
-        `Declared in ${conventions.aliases.files.join(', ')}. A new alias must go in all of ` +
-          'them, or it resolves in one toolchain and not the other.' +
-          (missing.length > 0
-            ? ` Already divergent: ${missing.map((entry) => `${entry.alias} (missing from ${entry.absent.join(', ')})`).join('; ')}.`
-            : ''),
-      );
-    }
-  }
+  // The import aliases are stated once, under Code Conventions, with the files that declare
+  // them; a second line here said the same thing in fewer words.
 
   if (Array.isArray(conventions.eslintIgnores) && conventions.eslintIgnores.length > 0) {
     // Not backticked: these are glob patterns, not paths that must exist.
@@ -750,34 +702,9 @@ async function renderBoundaries(facts) {
       );
     }
 
-    // Root-anchored first: `/ios` is this repository's own decision, `node_modules/` is
-    // everybody's, and the cap below hid the former behind the latter.
-    const ordered = [...ignored.ordinary.filter((p) => p.startsWith('/')), ...ignored.ordinary.filter((p) => !p.startsWith('/'))];
-    const shown = ordered.slice(0, 10);
-    const elided = ordered.length - shown.length;
-    if (shown.length > 0) {
-      lines.push(
-        `**Ignored paths.** Nothing under ${shown.join(', ')} reaches a commit, and nothing ` +
-          `under ${shown.length === 1 ? 'it is' : 'them is'} reviewed.` +
-          (elided > 0 ? ` ${elided} further pattern${elided === 1 ? '' : 's'} in .gitignore ${elided === 1 ? 'is' : 'are'} not listed here.` : ''),
-      );
-    }
-
-    if (ignored.negated.length > 0) {
-      lines.push(
-        `**Re-included.** ${ignored.negated.join(', ')} — a negated pattern means those paths ` +
-          'are tracked after all, whatever sits above them.',
-      );
-    }
-  }
-
-  const local = [...new Set([...(await readLocalExcludes(facts.cwd)), ...(facts.pendingLocalExcludes ?? [])])];
-  if (local.length > 0) {
-    lines.push(
-      `**Local excludes.** .git/info/exclude holds ${local.join(', ')} on this machine only. ` +
-        'Nobody else has them: a teammate cloning this repository gets none of these paths ' +
-        'excluded, so do not reason about them as if they were shared policy.',
-    );
+    // No list of ignored paths, re-included paths or local excludes: they restate .gitignore,
+    // and .git/info/exclude is one machine's. An ignored path that carries a rule is said
+    // where the rule is: credentials above, generated files and "not edited by hand" earlier.
   }
 
   if (lines.length === 0) return null;
@@ -795,9 +722,8 @@ function renderCommitStandard(facts) {
   const history = facts.history ?? { count: 0 };
   const lines = [];
 
-  if (facts.branchPattern) {
-    lines.push(`- Branch names follow \`${facts.branchPattern.text}\` (\`${facts.branchPattern.source}\`); the hook warns on any other.`);
-  }
+  // The branch pattern and CONTRIBUTING's merge rules are in Rules That Are Easy To Get
+  // Wrong, each with its reason. Said here too, they cost every session twice.
   if (facts.contributing?.commits) {
     lines.push(`- \`${facts.contributing.path}\` writes the commit rules down; where it and this count differ, it wins.`);
   }
@@ -852,24 +778,56 @@ function shapeText(key, ticketKey) {
  */
 function renderDecisions(facts) {
   const decisions = facts.decisions ?? { dir: 'docs/decisions', exists: false, records: [] };
-  const index = indexFileOf(decisions.dir);
-  // No path for a list that is not there yet: a backticked path is a claim it exists, and
-  // any mention of docs/ would count as describing a docs/ area the checker should report.
-  const lead = 'Decisions the team already made are recorded one per file, with who decided and where.';
-  const where = decisions.indexExists
-    ? `${lead} The list is \`${index}\`: one line per decision, linked to its record.`
-    : decisions.records.length > 0
-      ? `${lead} The list will be ${index}, one line per decision linked to its record, once \`${nasoCommand()} decisions sync\` writes it.`
-      : `${lead} No decision is recorded yet; the first one creates the list beside it.`;
+  const where = decisionsLead({ dir: decisions.dir, indexExists: Boolean(decisions.indexExists), records: decisions.records ?? [] });
   return [
     '## Decisions',
     '',
     where,
     '',
     '- Before proposing an approach, read the accepted decisions in it that apply to the paths you are changing, and follow them. Do not reopen one unless the person asks to.',
-    `- When the person decides something in a session, record it so the next session, account or agent starts from it: \`${nasoCommand()} decide --title "…" --source "…" --decision "…"\`. It is written as proposed.`,
+    '- Before asking the person a question, check the list: an accepted decision may already answer it, and a rejected or superseded one says why an option was turned down. Do not offer a turned-down option again without saying it was.',
+    `- When the person decides something in a session, record it before the session ends, so the next session, account or agent starts from it: \`${nasoCommand()} decide --title "…" --source "…" --decision "…" --why "…"\`, with one \`--considered "<option> — <why not>"\` per option turned down. It is written as proposed, and \`decide\` refuses a title that is already recorded.`,
     '- Never accept, reject or supersede a decision yourself; ask the person. A proposed decision is not binding.',
     `- \`${nasoCommand()} decisions audit\` lists records that no longer hold. It changes nothing.`,
+  ].join('\n');
+}
+
+/**
+ * What to read, in order, before anything else. The handoff first because it is the only
+ * thing here that changed since the last session; then this block; then the decisions,
+ * read for the paths about to change. A handoff kept in the git directory is named by
+ * the command that prints it, not by a path: the path is per machine, and an agent's file
+ * tools are often kept out of .git.
+ */
+/**
+ * The lessons index, linked, never the lessons: one line each there, read when it applies.
+ * A local index is named by the command that prints it, like the handoff.
+ */
+function lessonsLine(facts) {
+  const lessons = facts.lessons;
+  const record = `When a person corrects you or confirms an approach, record it: \`${nasoCommand()} lesson --title "…" --why "…" --apply "…"\`.`;
+  if (!lessons?.indexExists) return record;
+  const where = lessons.where === 'git' ? `\`${nasoCommand()} lessons\` prints the lessons index` : `Lessons from earlier sessions are indexed in \`${lessons.shown}/README.md\``;
+  return `${where}, one line each; read a lesson when its line applies. ${record}`;
+}
+
+export function renderReadFirst(facts) {
+  const handoff = facts.handoff;
+  const decisions = facts.decisions ?? {};
+  const handoffLine = handoff && handoff.where !== 'git'
+    ? `1. The handoff's NOW section, in \`${handoff.shown}\`.`
+    : `1. The handoff's NOW section: \`${nasoCommand()} handoff\` prints it (kept in the git directory, shared by every worktree).`;
+  const decisionsLine = decisions.indexExists
+    ? `3. The decisions in \`${decisions.dir}/README.md\` that apply to the paths you will change.`
+    : `3. The decisions that apply to the paths you will change: \`${guideRel('decisions')}\` says where they are kept.`;
+  return [
+    '## Read First',
+    '',
+    handoffLine,
+    `2. This block, then the guide ${TOUCH_HEADING} names for the work you are about to do.`,
+    decisionsLine,
+    '',
+    `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`. ${lessonsLine(facts)}`,
   ].join('\n');
 }
 
@@ -901,15 +859,16 @@ function commitStandardRule8(facts) {
   if (facts.agentsTracked) {
     return (
       '8. When a commit adds a genuinely new area, the hook appends one line for it\n' +
-      '   above and stages it with the commit. This file is tracked, so it is reviewed\n' +
-      '   like any other: if the hook reports it unstaged, that is a finding to fix.'
+      '   to the block in AGENTS.md and stages it with the commit. AGENTS.md and .naso/guides/\n' +
+      '   are tracked, so they are reviewed like any other file: if the hook reports\n' +
+      '   AGENTS.md unstaged, that is a finding to fix.'
     );
   }
 
   return (
-    '8. This file is not in the index and never will be: it is local to this machine,\n' +
-    '   excluded through .git/info/exclude so setup leaves no trace in the history. Do\n' +
-    '   not stage it, do not `git add -f` it, and do not mention it in a commit message.\n' +
+    '8. AGENTS.md and .naso/ are not in the index and never will be: they are local to this\n' +
+    '   machine, excluded through .git/info/exclude so setup leaves no trace in the history.\n' +
+    '   Do not stage them, do not `git add -f` them, and do not mention them in a commit message.\n' +
     '   The line the hook appends for a new area stays unstaged and is reported; every\n' +
     "   teammate's briefing is generated from their own scan of their own checkout."
   );
@@ -1027,6 +986,12 @@ function rewriterNote(facts) {
   const notes = [
     ...(facts.rewriters ?? []).map((entry) => `\`${entry.command}\` rewrites files (\`${entry.body}\`); it is not a check.`),
     ...(facts.generated ?? []).map((entry) => `\`${entry.command}\` rewrites \`${entry.path}\`; it is not a check.`),
+    ...((facts.longRunning ?? []).length > 0
+      ? [
+          `${facts.longRunning.map((entry) => `\`${entry.command}\``).join(', ')} ${facts.longRunning.length === 1 ? 'never exits' : 'never exit'} ` +
+            `(${facts.longRunning.map((entry) => `\`${entry.body}\``).join(', ')}); ${facts.longRunning.length === 1 ? 'do not run it as a check' : 'do not run them as checks'}.`,
+        ]
+      : []),
   ];
   return notes.length > 0 ? notes.join(' ') : null;
 }
@@ -1096,35 +1061,81 @@ function renderCiGate(facts, rewriters) {
   return lines.join('\n\n');
 }
 
-export async function renderBriefing(facts, { version, now }) {
+/**
+ * The block and its guides, from one scan.
+ *
+ * The block is what every session reads before it starts: what the repository is, the
+ * handoff, the rules that are easy to get wrong, the areas, the commands and when the work
+ * is done, and a table naming the guide to read for each kind of task. Everything else goes
+ * to a guide in .naso/guides/, read when that kind of task comes up. A guide with nothing
+ * to say is not written, and the table has no row for it.
+ */
+export async function renderLayers(facts, { version, now }) {
   const parts = [];
+  const project = facts.projectName;
+  const topics = new Map(TOPICS.map((topic) => [topic.name, []]));
+  const areaGuides = new Map();
+  const toTopic = (heading, text) => {
+    const topic = TOPICS.find((entry) => entry.sections.includes(heading));
+    topics.get(topic.name).push(text);
+  };
+  // A section about one folder goes to that area's guide; the table routes changes there.
+  const toArea = (dir, text, heading) => {
+    const top = String(dir).split('/')[0];
+    const area = facts.areas.find((entry) => entry.name === top);
+    if (!area) return toTopic(heading, text);
+    if (!areaGuides.has(area.name)) areaGuides.set(area.name, []);
+    areaGuides.get(area.name).push(text);
+  };
 
   parts.push(
     `${NASO_START}\n${TEMPLATE_HEADER.replace('__VERSION__', version).replace('__DATE__', now)}`,
   );
 
-  parts.push(`# ${facts.projectName} — Agent Instructions`);
+  parts.push(`# ${project} — Agent Instructions`);
   parts.push(`> Generated by NASO ${version} on ${now} from the ${countProvenance(facts)}.
-> Every path below was read while this file was written, and every count is a count.
-> Where NASO could not derive a fact, the section is absent rather than guessed at.
->
-> Maintained through normal code review. NASO never regenerates this file
-> wholesale; the pre-commit hook appends at most one line per genuinely new area.`);
+> \`${nasoCommand()} briefing\` checks every path here and in the guides this block links. What NASO could not derive is left out, not guessed.`);
 
   // What the repository is, before where things are in it: "an Expo mobile app" or "a Go
   // API service" changes how every path below is read, and it is one line.
   if (facts.stack?.summary) parts.push(`**What this is.** ${facts.stack.summary}`);
 
+  parts.push(renderReadFirst(facts));
+
   // Said first, because every later section is read in its light. The default is NASO's
   // own position — it derived this block, people wrote the rest — and the quoted lines are
   // the repository's, with file and line so a reader can check them.
-  const wins = [
-    'Where this block and a file people wrote disagree, the file wins: NASO derived this block from the repository, and they wrote theirs on purpose.',
-    ...(facts.precedence ?? []).map((entry) => `- \`${entry.file}\` line ${entry.line}: “${entry.text}”`),
-  ];
-  parts.push(`## Which Document Wins\n\n${wins.join('\n')}`);
+  // Which document wins is said first, because every later line is read in its light. The
+  // default is NASO's own position — it derived this block, people wrote the rest — and the
+  // quoted lines are the repository's, with file and line so a reader can check them. With
+  // nothing quoted it is one line, so it opens the correction section instead of a heading
+  // of its own.
+  const winsLine = 'Where this block and a file people wrote disagree, the file wins: NASO derived this block from the repository, and they wrote theirs on purpose.';
+  const precedence = (facts.precedence ?? []).map((entry) => `- \`${entry.file}\` line ${entry.line}: “${entry.text}”`);
+  if (precedence.length > 0) parts.push(`## Which Document Wins\n\n${[winsLine, ...precedence].join('\n')}`);
 
-  parts.push(renderDecisions(facts));
+  // The block is only as good as its last correction, and the agent reading it is the first
+  // to find a line the repository contradicts. Working around a wrong line leaves it for the
+  // next session to trip on; correcting it, with a cited file, ends it.
+  parts.push(
+    [
+      '## When This Block Is Wrong',
+      '',
+      ...(precedence.length > 0 ? [] : [`- ${winsLine}`]),
+      '- If a path, count, command or rule here or in a guide is contradicted by the repository, do not work around it silently. Correct the line, name the file that proves the correction, and say so in your summary to the person.',
+      `- \`${nasoCommand()} review\` prints the full review. \`${nasoCommand()} briefing\` checks every path claim; run it after any edit.`,
+    ].join('\n'),
+  );
+
+  // Right after how to correct the block, before anything long: the traps are the lines an
+  // agent most needs and most often skims past.
+  const traps = renderTraps(facts.traps);
+  if (traps) parts.push(traps);
+
+  // The table goes here once the guides are known.
+  const touchAt = parts.length;
+
+  toTopic('Decisions', renderDecisions(facts));
 
   const dirs = facts.areas;
   const rootFiles = renderRootFiles(facts.entries, facts);
@@ -1147,7 +1158,7 @@ export async function renderBriefing(facts, { version, now }) {
   if (map) {
     const rows = map.rows.map(
       (row) =>
-        `| \`${row.dir}\` | ${plural(row.files, 'file')} | ${row.purpose ? `${row.purpose.text} (\`${row.purpose.doc}\`)` : 'no doc describes it'} |`,
+        `| \`${row.dir}\` | ${row.purpose ? `${row.purpose.text} (\`${row.purpose.doc}\`)` : 'no doc describes it'} |`,
     );
     const notes = [
       ...(map.more > 0 ? [`${map.more} further folders are not listed.`] : []),
@@ -1155,51 +1166,69 @@ export async function renderBriefing(facts, { version, now }) {
       // Not backticked: these are the folders that do not exist.
       ...map.stale.map((entry) => `\`${entry.doc}\` names ${entry.dir}, which is not in the repository.`),
     ];
-    parts.push(
+    toArea(
+      map.root,
       `## Source Map\n\nEvery folder under \`${map.root}/\`, with what the repository's own docs say it is for.\n\n` +
-        `| Folder | Files | What it is for |\n| --- | --- | --- |\n${rows.join('\n')}` +
+        `| Folder | What it is for |\n| --- | --- |\n${rows.join('\n')}` +
         (notes.length > 0 ? `\n\n${notes.join('\n')}` : ''),
+      'Source Map',
     );
   }
 
-  if (facts.featureMap) {
-    const rows = facts.featureMap.rows.slice(0, 20).map((row) => {
-      const dir = `${facts.featureMap.dir}/${row.key}/`;
-      const role = roleFor(row.key);
-      return `| ${humanize(row.key)} | \`${dir}\` | ${plural(row.count, 'file')}${role ? `, ${role}` : ''} |`;
-    });
-    const omitted = facts.featureMap.rows.length - rows.length;
+  // Only folders whose name says what they hold. A row of "Auth | src/features/auth/ |
+  // 12 files" restated the path and a count, and reviews removed the whole table.
+  const featured = (facts.featureMap?.rows ?? []).filter((row) => roleFor(row.key));
+  if (featured.length > 0) {
+    const rows = featured.slice(0, 20).map((row) => `| ${humanize(row.key)} | \`${facts.featureMap.dir}/${row.key}/\` | ${roleFor(row.key)} |`);
+    const omitted = featured.length - rows.length;
     const more = omitted > 0
       ? `\n\n${omitted} further director${omitted === 1 ? 'y' : 'ies'} exist under the same parent; this table is capped so the map stays scannable.`
       : '';
-    parts.push(
+    toArea(
+      facts.featureMap.dir,
       `## Feature To Folder Map\n\n` +
         `Read from the directory layout under \`${facts.featureMap.dir}/\`.\n\n` +
         `| Feature | Lives in | Notes |\n| --- | --- | --- |\n${rows.join('\n')}${more}`,
+      'Feature To Folder Map',
     );
   }
 
   // Only rules this repository confirmed; a stack with none gets no heading.
-  if (facts.stack?.rules?.length > 0) {
-    parts.push(`## Stack Rules\n\n${facts.stack.rules.map((rule) => `- ${rule}`).join('\n')}`);
+  const stackRules = [...(facts.stack?.rules ?? []), ...frameworkRules(facts.toolchain ?? {}, codeIfSafe(facts))];
+  if (stackRules.length > 0) {
+    toTopic('Stack Rules', `## Stack Rules\n\n${stackRules.map((rule) => `- ${rule}`).join('\n')}`);
   }
 
   const conventions = renderConventions(facts);
-  const warnings = (await scanWarnings(facts)).filter((warning) => warning.where === 'briefing');
-  const warningText = warnings.length
-    ? `\n\n${warnings.map((w) => `**WARN** ${w.headline}: ${w.detail}. Tracked files read as covered; nothing runs them unless the script names them.`).join('\n\n')}`
-    : '';
+  if (conventions) toTopic('Code Conventions', `## Code Conventions\n\n${conventions.join('\n')}`);
 
-  if (conventions) {
-    const validation = renderValidation(facts);
-    parts.push(`## Code Conventions\n\n${conventions.join('\n')}${warningText}${validation ? `\n\n${validation}` : ''}`);
-  } else if (renderValidation(facts)) {
-    parts.push(`## Validation\n\n${renderValidation(facts)}${warningText}`);
-  } else if (warningText) {
-    parts.push(`## Validation\n\n${warningText.trim()}`);
-  }
+  const boundaries = await renderBoundaries(facts);
+  if (boundaries) toTopic('Boundaries', `## Boundaries\n\n${boundaries.join('\n')}`);
 
-  parts.push(`## Scope
+  // The hook's Format step needs a Prettier config and Prettier; its Lint step needs a "lint"
+  // script and ESLint (validate.mjs, --staged). Said from the config and the manifest, not
+  // node_modules, which differs per machine. Claiming both everywhere told agents a repository
+  // with neither was formatted and linted on every commit.
+  const deps = facts.conventions?.deps ?? {};
+  // ESLint and Prettier often arrive through a preset (eslint-config-expo), so a lint script
+  // or a config that names the tool counts as much as a direct dependency.
+  const scripts = facts.pkg?.scripts ?? {};
+  const formats =
+    Boolean(facts.conventions?.prettierConfig || facts.pkg?.prettier || facts.toolchain?.prettier) &&
+    (Boolean(deps.prettier) || Object.values(scripts).some((body) => /\bprettier\b/.test(String(body))));
+  const lints = Boolean(scripts.lint) && (Boolean(deps.eslint) || Boolean(facts.conventions?.eslintConfig) || /\beslint\b/.test(String(scripts.lint)));
+  const steps = ['secret-shaped lines', 'scope', ...(formats ? ['format (Prettier)'] : []), ...(lints ? ['lint (ESLint)'] : [])];
+  const stepList = `${steps.slice(0, -1).join(', ')} and ${steps.at(-1)}`;
+  const prettierConfigured = Boolean(facts.conventions?.prettierConfig || facts.pkg?.prettier || facts.toolchain?.prettier);
+  const missing = [
+    ...(formats ? [] : [prettierConfigured ? 'no Prettier dependency' : 'no Prettier config']),
+    ...(lints ? [] : [scripts.lint ? 'no ESLint' : 'no "lint" script']),
+  ];
+  const skipped = missing.length === 0
+    ? ''
+    : ` Its ${[formats ? null : 'format', lints ? null : 'lint'].filter(Boolean).join(' and ')} ${missing.length > 1 ? 'steps skip' : 'step skips'} here: there is ${missing.join(' and ')}.`;
+
+  toTopic('Scope', `## Scope
 
 Before editing, name the path prefixes the task owns; the pre-commit hook reports
 staged paths outside them, and refuses them with \`NASO_SCOPE_STRICT=1\`:
@@ -1208,29 +1237,69 @@ staged paths outside them, and refuses them with \`NASO_SCOPE_STRICT=1\`:
 export NASO_SCOPE=path/to/area,other/area
 \`\`\`
 
-The hook runs only where setup installed it, from .git/hooks on that machine; CI does not run it,
-and a fresh clone has none until setup runs there. Every rule below that names the hook holds on
-that machine only. It checks staged files for secret-shaped lines, scope, format and lint, and
-adds a line here for a new top-level area; its branch-name check only warns. It does not
-type-check, run tests or read the commit message. If .naso/tooling/ is missing it prints one
-line and lets the commit through.`);
+The hook runs only where setup installed it, in .git/hooks on that machine; CI does not run it,
+and a fresh clone has none until someone runs \`${nasoCommand()} refresh\` there, which installs it
+and, at the version already vendored, changes nothing else. It checks staged files for ${stepList},
+and adds a line to the block for a new top-level area; its branch-name check only warns.${skipped}
+It does not type-check, run tests or read the commit message. If .naso/tooling/ is missing it
+prints one line and lets the commit through.`);
 
-  const boundaries = await renderBoundaries(facts);
-  if (boundaries) parts.push(`## Boundaries\n\n${boundaries.join('\n')}`);
+  toTopic('Commit Standard', `## Commit Standard\n\n${renderCommitStandard(facts).join('\n')}`);
 
-  parts.push(`## Secrets
+  // The checklist a merge request is reviewed against is a set of rules the team already
+  // wrote; quoted with file and line, so the checker can test every item.
+  const checklists = facts.toolchain?.checklists ?? [];
+  if (checklists.length > 0) {
+    toTopic(
+      'Merge Request Checklist',
+      `## Merge Request Checklist\n\nEvery merge request here is reviewed against these items. Meet them before asking for review:\n\n` +
+        checklists
+          .map(
+            (list) =>
+              list.items.map((item) => `- \`${list.file}\` line ${item.line}: “${item.text}”`).join('\n') +
+              (list.more > 0 ? `\n- and ${list.more} more in \`${list.file}\`` : ''),
+          )
+          .join('\n'),
+    );
+  }
 
-The pre-commit hook refuses staged lines shaped like keys and tokens, and reports
-the path and rule, never the value. Do the same: if a secret is already committed,
-report its path and stop.`);
+  // Every session needs this one, whatever the task: it is three lines.
+  parts.push('## Secrets\n\nThe pre-commit hook refuses staged lines shaped like keys and tokens, and reports the path and rule, never the value. Do the same: if a secret is already committed, report its path and stop.');
 
-  parts.push(`## Commit Standard\n\n${renderCommitStandard(facts).join('\n')}`);
+  const warnings = (await scanWarnings(facts)).filter((warning) => warning.where === 'briefing');
+  const warningText = warnings.length
+    ? `\n\n${warnings.map((w) => `**WARN** ${w.headline}: ${w.detail}. Tracked files read as covered; nothing runs them unless the script names them.`).join('\n\n')}`
+    : '';
+  // Under its own heading here, so the sub-heading renderValidation opens with would repeat it.
+  const validation = renderValidation(facts)?.replace(/^### Validation commands\n\n/, '');
+  if (validation) parts.push(`## Validation\n\n${validation}${warningText}`);
+  else if (warningText) parts.push(`## Validation\n\n${warningText.trim()}`);
 
   const done = renderWhenDone(facts);
   if (done) parts.push(`## When Done\n\n${done}`);
 
   parts.push(`${NASO_END}`);
 
+  // The guides, and the table that routes to them: topics first, then one row per area guide.
+  const guides = [];
+  const rows = [];
+  for (const topic of TOPICS) {
+    const sections = topics.get(topic.name);
+    if (sections.length === 0) continue;
+    const rel = guideRel(topic.name);
+    guides.push({ name: topic.name, rel, text: renderGuide({ project, title: topic.title, when: topic.when, sections }) });
+    rows.push({ when: topic.when, rel });
+  }
+  for (const [area, sections] of areaGuides) {
+    const name = areaGuideName(area);
+    const rel = guideRel(name);
+    const when = `change files under \`${area}/\``;
+    guides.push({ name, rel, text: renderGuide({ project, title: `${area}/`, when: `change files under ${area}/`, sections }) });
+    rows.push({ when, rel });
+  }
+  const table = renderTouchTable(rows);
+  if (table) parts.splice(touchAt, 0, table);
+
   const text = `${parts.join('\n\n')}\n`;
-  return text.replace('__DIGEST__', blockDigest(text));
+  return { block: text.replace('__DIGEST__', blockDigest(text)), guides };
 }

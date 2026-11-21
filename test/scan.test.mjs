@@ -17,6 +17,8 @@ import {
   seedEgom,
   seedGroundTruth,
   sectionOf,
+  readBriefing,
+  naso,
 } from './helpers.mjs';
 
 test('a gitignored build directory is not counted, described or listed', async () => {
@@ -36,7 +38,7 @@ test('a gitignored build directory is not counted, described or listed', async (
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     // Naming an ignored path as an ignore rule is correct; describing it as an area,
     // an entry point or part of any count is the bug this test exists for.
     assert.ok(
@@ -73,7 +75,7 @@ test('every command the briefing tells an agent to run uses pnpm and names a rea
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     const scripts = JSON.parse(await read(dir, 'package.json')).scripts;
     const commands = [...text.matchAll(/`((?:npm|pnpm|yarn|bun) run [\w:.-]+)`/g)].map((m) => m[1]);
     assert.ok(commands.length >= 5, `expected the gate and the checks, got: ${commands.join(', ')}`);
@@ -203,7 +205,7 @@ test('the gate is one command plus what it subsumes, not a list of peers', async
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
 
     assert.match(text, /One gate: `pnpm run verify` — the authority is `\.github\/workflows\/ci\.yml`, the verify job/);
     // The subsumed list, collapsed rather than repeated as four peer commands.
@@ -239,7 +241,7 @@ test('a tracked test file the test script never runs is named as a warning', asy
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /runner node:test, 2 test files \(under `e2e\/`, `test\/`\), run by `npm run test` as `test\/`/);
     assert.match(
       text,
@@ -265,7 +267,7 @@ test('a test script that names no path makes no coverage claim', async () => {
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /`npm run test` names no path, so it discovers its own inputs/);
     assert.ok(!/\*\*WARN\*\* `npm run test`/.test(text), 'no path means no claim, not a false alarm');
   });
@@ -300,7 +302,7 @@ test('findUncoveredTests compares tracked test files against what the script run
   ]);
 });
 
-test('every tracked root file is listed, however many there are', async () => {
+test('root file names are not listed: ls gives them, and the list was the longest line in most blocks', async () => {
   await withRepo(async ({ dir, git, script }) => {
     await put(dir, 'package.json', JSON.stringify({ name: 'wide-root' }));
     await put(dir, 'src/index.ts', 'export const x = 1;\n');
@@ -332,10 +334,8 @@ test('every tracked root file is listed, however many there are', async () => {
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
     const text = await read(dir, AGENTS);
-    const line = text.match(/^Root files, none of which is an area of its own: .*$/m)?.[0] ?? '';
-    for (const file of rootFiles.filter((f) => f !== 'AGENTS.md.stub')) {
-      assert.ok(line.includes(`\`${file}\``), `${file} is missing from the root file list: ${line}`);
-    }
+    assert.doesNotMatch(text, /Root files, none of which is an area of its own/);
+    assert.doesNotMatch(text, /`\.watchmanconfig`|`metro\.config\.js`/, 'no root file is named just for being there');
   });
 });
 
@@ -367,7 +367,7 @@ test('an alias declared in babel but not tsconfig is named, with the file that m
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /Import aliases: @ → src \(tsconfig\.json as @\/\* — babel\.config\.js does not declare it\); @legacy → src\/legacy \(babel\.config\.js as @legacy\/\* — tsconfig\.json does not declare it\)\./);
     // The divergence is stated, not smoothed over.
     assert.match(text, /@legacy .*tsconfig\.json does not declare it/s);
@@ -396,7 +396,7 @@ test('the entry point is the one package.json declares, not a file named index',
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /The entry point is `server\.js` — package\.json "main"\./);
     // index.js is still listed as a file — it is tracked — but it is not offered as the
     // entry point, because nothing in package.json says it is.
@@ -419,7 +419,7 @@ test('a folder on the other module system is named instead of averaged away', as
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /Modules: ES modules \(package\.json declares "type": "module"\)\./);
     assert.match(text, /Not one module system throughout: `plugins\/` is CommonJS \(1 \.cjs file\)\./);
   });
@@ -453,7 +453,7 @@ test('these warnings stay out of AGENTS.md, which documents the repository as it
     assert.equal(res.code, 0, res.stdout + res.stderr);
     assert.match(res.stdout, /Node version disagree/);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(!text.includes('Node version disagree'), 'setup-only warning must not be written to AGENTS.md');
     assert.ok(!text.includes('credential-shaped'), 'setup-only warning must not be written to AGENTS.md');
   });
@@ -473,8 +473,8 @@ test('boundaries lead the section: enforced seams, then aliases, then ignores', 
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
-    const section = text.slice(text.indexOf('## Boundaries'), text.indexOf('## Secrets'));
+    const text = await readBriefing(dir);
+    const section = sectionOf(text, 'Boundaries');
 
     // The repository's own enforced boundaries come first, each with the doc that holds
     // the rule and whether the gate runs it.
@@ -487,22 +487,19 @@ test('boundaries lead the section: enforced seams, then aliases, then ignores', 
       /- `verify:boundary:auth` \(`pnpm run verify:boundary:auth`\) — checks `scripts\/verify-boundary-auth\.mjs`, runs in the gate; the rule is in `docs\/boundaries\/auth\.md`\./,
     );
 
-    // Aliases next.
-    assert.match(section, /\*\*Import aliases\.\*\* @ → app\./);
+    // Aliases are stated once, under Code Conventions, not again here.
+    assert.doesNotMatch(section, /Import aliases/);
+    assert.match(text, /^Import aliases: @ → app /m);
 
     // Credentials from .gitignore, listed in full rather than truncated to fit.
     assert.match(section, /\*\*Credentials\.\*\* \.gitignore excludes [^.]*\*\.keystore/);
     assert.ok(
-      section.indexOf('**Enforced checks.**') < section.indexOf('**Import aliases.**') &&
-        section.indexOf('**Import aliases.**') < section.indexOf('**Credentials.**'),
-      `boundaries must be ordered enforced, aliases, ignores:\n${section}`,
+      section.indexOf('**Enforced checks.**') < section.indexOf('**Credentials.**'),
+      `boundaries must be ordered enforced, then ignores:\n${section}`,
     );
 
-    // The local exclude file is named as its own, non-shared mechanism.
-    assert.match(
-      section,
-      /\*\*Local excludes\.\*\* \.git\/info\/exclude holds \.naso, AGENTS\.md, CLAUDE\.md on this machine only\./,
-    );
+    // One machine's .git/info/exclude is not a fact about the repository.
+    assert.doesNotMatch(section, /Local excludes/);
   });
 });
 
@@ -542,8 +539,7 @@ test('an unreadable gate does not claim the boundary scripts are not in it', asy
 
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
-    const section = text.slice(text.indexOf('## Boundaries'), text.indexOf('## Secrets'));
+    const section = sectionOf(await readBriefing(dir), 'Boundaries');
 
     // The gate could not be read, so membership is unknown — and unknown is not "no".
     assert.doesNotMatch(section, /not shown to run in the gate/);
@@ -584,7 +580,7 @@ test('a gate that cannot be parsed says so and names the file instead of guessin
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /\*\*WARN\*\* The gate could not be parsed; see `scripts\/gate\.mjs`/);
     assert.ok(!/It runs, in order/.test(text), 'an unread gate must not claim a step list');
   });
@@ -648,7 +644,7 @@ test('an Expo-shaped repository produces a usable briefing', async () => {
     const setup = await script('setup', ['--yes']);
     assert.equal(setup.code, 0, setup.stdout + setup.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /app\//, 'the router directory is an area');
     assert.match(text, /src\//, 'the source directory is an area');
     assert.match(text, /npm run lint/, 'a declared lint command should be recorded');
@@ -668,7 +664,7 @@ test('Boundaries names every verify:* script the parsed gate runs, marked only w
 
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const boundaries = sectionOf(await read(dir, AGENTS), 'Boundaries');
+    const boundaries = sectionOf(await readBriefing(dir), 'Boundaries');
     assert.match(boundaries, /- `verify:boundaries` \(`pnpm run verify:boundaries`\) — checks `scripts\/check-boundaries\.mjs`, runs in the gate/);
     assert.match(boundaries, /- `verify:licenses` \(`pnpm run verify:licenses`\) — checks `scripts\/check-licenses\.mjs`, runs in the gate/);
     assert.match(boundaries, /- `verify:orphan` .*not run by the gate/);
@@ -681,8 +677,8 @@ test('@a in babel and @a/* in tsconfig are one alias; only @b is divergent', asy
     await seedGroundTruth(dir, git);
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
-    assert.match(text, /Already divergent: @b \(missing from tsconfig\.json\)\./);
+    const text = await readBriefing(dir);
+    assert.match(text, /@b → [^;\n]*— tsconfig\.json does not declare it/);
     assert.ok(!/@a[^\n]*missing from/.test(text), `@a is declared in both files:\n${sectionOf(text, 'Boundaries')}`);
     assert.match(text, /@a → src\/a \(tsconfig\.json as @a\/\*, babel\.config\.js\)/);
   });
@@ -698,7 +694,7 @@ test('a folder whose own package.json makes its .js CommonJS is named', async ()
     await git('add', '-A');
     await git('commit', '-qm', 'two systems by package.json');
     await bare(['--yes']);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /`legacy\/` is CommonJS \(2 \.js files; legacy\/package\.json declares no "type"\)/);
     assert.ok(!/`src\/` is/.test(text), 'a folder on the repository default is not named');
   });
@@ -708,7 +704,7 @@ test('tests under test/ are not called co-located; a split layout is reported as
   await withRepo(async ({ dir, git, bare }) => {
     await seedGroundTruth(dir, git);
     await bare(['--yes']);
-    const tests = (await read(dir, AGENTS)).split('\n').find((line) => line.startsWith('Tests:'));
+    const tests = (await readBriefing(dir)).split('\n').find((line) => line.startsWith('Tests:'));
     assert.ok(!/2 test files co-located/.test(tests), tests);
     assert.match(tests, /2 test files \(1 co-located with source, 1 under `test\/`\)/);
   });
@@ -735,7 +731,7 @@ test('a Python repository is not told to use npm or package.json', async () => {
 
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /npm/);
     assert.doesNotMatch(text, /package\.json/);
     assert.match(text, /Python dependencies: `requirements\.txt`/);
@@ -752,8 +748,8 @@ test('the area holding package.json "bin" is the published command, and lib.mjs 
     await git('commit', '-qm', 'cli');
 
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
-    assert.match(text, /^- `bin\/` — published command \(package\.json "bin"\);/m);
+    const text = await readBriefing(dir);
+    assert.match(text, /^- `bin\/` — published command \(package\.json "bin"\)[;.]/m);
     assert.doesNotMatch(text, /entry `tooling\/lib\.mjs`/);
   });
 });
@@ -767,8 +763,74 @@ test('an area the published command imports is named as what it loads, not by it
     await git('add', '-A');
     await git('commit', '-qm', 'cli');
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
-    assert.match(text, /^- `tooling\/` — code the published command loads \(`bin\/demo\.mjs` imports it\);/m);
-    assert.match(text, /^- `scripts\/` — developer scripts;/m);
+    const text = await readBriefing(dir);
+    assert.match(text, /^- `tooling\/` — code the published command loads \(`bin\/demo\.mjs` imports it\)[;.]/m);
+    assert.match(text, /^- `scripts\/` — developer scripts[;.]/m);
+  });
+});
+
+test('a packageManager field with no lockfile of its own loses to the lockfile that exists', async () => {
+  // In the field: "packageManager": "pnpm@9.12.2", no pnpm-lock.yaml, a maintained
+  // package-lock.json, and every doc saying npm. The briefing told agents to use pnpm, and
+  // NASO's own install had just written package-lock.json.
+  await withRepo(async ({ dir }) => {
+    const pkg = { name: 'app', packageManager: 'pnpm@9.12.2' };
+    await put(dir, 'package.json', JSON.stringify(pkg));
+    await put(dir, 'package-lock.json', '{}\n');
+    assert.deepEqual(await detectPackageManager(dir, pkg), {
+      name: 'npm',
+      source: 'lock',
+      evidence: 'package-lock.json; package.json "packageManager" names pnpm, but there is no pnpm-lock.yaml',
+    });
+
+    // The field still wins when its own lockfile is there, or when there is no lockfile at all.
+    await put(dir, 'pnpm-lock.yaml', '');
+    assert.equal((await detectPackageManager(dir, pkg)).source, 'field');
+  });
+});
+
+test('an alias to the repository root is said to point there, not at "*"', async () => {
+  // In the field tsconfig "@/*": ["./*"] was rendered "@ → *", and the import that
+  // proves the mapping is `@/src/lib/utils`.
+  await withRepo(async ({ dir, git }) => {
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', type: 'module' }));
+    await put(dir, 'tsconfig.json', JSON.stringify({ compilerOptions: { paths: { '@/*': ['./*'] } } }));
+    await put(dir, 'src/index.ts', "import { cn } from '@/src/lib/utils';\n");
+    await put(dir, 'src/lib/utils.ts', 'export const cn = 1;\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'root alias');
+    const { createBriefing } = await import('../tooling/briefing.mjs');
+    assert.ok((await createBriefing(dir, { force: true })).ok);
+    const text = await readBriefing(dir);
+    assert.match(text, /^Import aliases: @ → the repository root \(tsconfig\.json as @\/\*\)\./m);
+  });
+});
+
+test('npm test, and pnpm or yarn running a script without "run", count as running that script', async () => {
+  const { labelForInvocation } = await import('../tooling/scan.mjs');
+  const scripts = { test: 'jest', lint: 'eslint .', start: 'node .' };
+  assert.equal(labelForInvocation('npm test', scripts), 'test');
+  assert.equal(labelForInvocation('npm t', scripts), 'test');
+  assert.equal(labelForInvocation('yarn test', scripts), 'test');
+  assert.equal(labelForInvocation('pnpm test', scripts), 'test');
+  assert.equal(labelForInvocation('npm start', scripts), 'start');
+  assert.equal(labelForInvocation('pnpm lint', scripts), 'lint');
+  assert.equal(labelForInvocation('yarn lint --fix', scripts), 'lint');
+  // pnpm install is pnpm's own command, not a script; bun test is bun's own test runner.
+  assert.equal(labelForInvocation('pnpm install', scripts), 'pnpm install');
+  assert.equal(labelForInvocation('bun test', scripts), 'bun test');
+});
+
+test('a CI job that runs npm test is not told it leaves the test script unrun', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await put(dir, 'package.json', JSON.stringify({ name: 'ci-test', scripts: { lint: 'eslint .', test: 'jest' } }));
+    await put(dir, 'package-lock.json', '{"lockfileVersion":3}\n');
+    await put(dir, 'src/index.js', 'export const x = 1;\n');
+    await put(dir, '.github/workflows/ci.yml', 'name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run lint\n      - run: npm test\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'init');
+    const res = await naso([dir, '--yes', '--no-hook'], dir);
+    assert.equal(res.code, 0, res.stdout + res.stderr);
+    assert.doesNotMatch(await read(dir, 'AGENTS.md'), /Declared but not run by CI: [^\n]*npm run test/);
   });
 });

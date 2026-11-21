@@ -6,7 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir } from 'node:fs/promises';
 import { parseDecision } from '../tooling/decisions.mjs';
-import { BIN, AGENTS, exec, withRepo, put, read, exists, seedProject, sectionOf } from './helpers.mjs';
+import { BIN, AGENTS, exec, withRepo, put, read, exists, seedProject, sectionOf, readBriefing } from './helpers.mjs';
 
 const naso = (dir, args) => exec(process.execPath, [BIN, ...args], dir);
 
@@ -75,13 +75,13 @@ test('AGENTS.md carries the rules and one link; the list lives in the decisions 
     assert.equal((await naso(dir, ['decisions', 'sync'])).code, 0);
     assert.equal((await bare(['--yes', '--track'])).code, 0);
 
-    const section = sectionOf(await read(dir, AGENTS), 'Decisions');
+    const section = sectionOf(await readBriefing(dir), 'Decisions');
     assert.match(section, /The list is `docs\/decisions\/README\.md`: one line per decision, linked to its record\./);
     assert.match(section, /Before proposing an approach, read the accepted decisions in it/);
     assert.match(section, /`npx naso-dev decide --title/);
     assert.match(section, /Never accept, reject or supersede a decision yourself/);
     assert.doesNotMatch(section, /0001|Use REST|naso:decisions/, 'no decision is listed in AGENTS.md');
-    assert.ok(section.trim().split('\n').length <= 8, 'the section stays the same size however many decisions there are');
+    assert.ok(section.trim().split('\n').length <= 9, 'the section stays the same size however many decisions there are');
     assert.equal((await script('briefing')).code, 0);
 
     const index = await read(dir, 'docs/decisions/README.md');
@@ -90,7 +90,7 @@ test('AGENTS.md carries the rules and one link; the list lives in the decisions 
     assert.match(index, /^## Rejected or superseded\n\n- \[0003 Use SOAP\]\(0003-soap\.md\) — rejected$/m);
 
     // Accepting rewrites the record and the list between the markers, nothing else.
-    const agentsBefore = await read(dir, AGENTS);
+    const agentsBefore = await readBriefing(dir);
     await put(dir, 'docs/decisions/README.md', `${index}\nNotes the team wrote under the list.\n`);
     const res = await naso(dir, ['decisions', 'accept', '0002']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
@@ -99,7 +99,7 @@ test('AGENTS.md carries the rules and one link; the list lives in the decisions 
     const after = await read(dir, 'docs/decisions/README.md');
     assert.match(after, /^## Accepted\n\n- \[0001 Use REST\][^\n]*\n- \[0002 Try GraphQL\]\(0002-graphql\.md\) — Slack thread$/m);
     assert.match(after, /Notes the team wrote under the list\.\n$/);
-    assert.equal(await read(dir, AGENTS), agentsBefore, 'AGENTS.md does not change when a decision does');
+    assert.equal(await readBriefing(dir), agentsBefore, 'AGENTS.md does not change when a decision does');
   });
 });
 
@@ -107,7 +107,7 @@ test('with no decisions yet, AGENTS.md names no folder that is not there', async
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const section = sectionOf(await read(dir, AGENTS), 'Decisions');
+    const section = sectionOf(await readBriefing(dir), 'Decisions');
     assert.match(section, /No decision is recorded yet; the first one creates the list/);
     assert.doesNotMatch(section, /docs\//);
     assert.equal((await script('briefing')).code, 0);
@@ -187,7 +187,7 @@ test('the hook refuses a decision record with no status, and refreshes the list 
     assert.match(await read(dir, 'docs/decisions/README.md'), /- \[0001 Good now\]\(0001-bad\.md\)/);
     const staged = (await git('diff', '--cached', '--name-only')).stdout;
     assert.match(staged, /docs\/decisions\/README\.md/, 'the refreshed list rides along with the commit');
-    assert.doesNotMatch(await read(dir, AGENTS), /Good now/, 'no decision is listed in AGENTS.md');
+    assert.doesNotMatch(await readBriefing(dir), /Good now/, 'no decision is listed in AGENTS.md');
   });
 });
 
@@ -201,7 +201,7 @@ test('the first decision creating docs/ still gets its area line', async () => {
     await git('add', 'docs/decisions');
     const res = await exec(process.execPath, [`${dir}/.naso/tooling/validate.mjs`, dir, '--staged'], dir);
     assert.equal(res.code, 0, res.stdout);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     const auto = text.slice(text.indexOf('<!-- naso:auto:start -->'), text.indexOf('<!-- naso:auto:end -->'));
     assert.match(auto, /`docs\/`/, 'docs/ is a new area and gets its line');
     assert.match(await read(dir, 'docs/decisions/README.md'), /- \[0001 Use REST\]\(0001-use-rest\.md\)/);
@@ -229,5 +229,21 @@ test('the decisions list is written with blank lines around headings, lists and 
     assert.equal((await naso(dir, ['decide', '--title', 'Use REST', '--decision', 'REST only.', '--source', 'kickoff'])).code, 0);
     const index = await read(dir, 'docs/decisions/README.md');
     assert.match(index, /<!-- naso:decisions:start -->\n\n## Proposed, not binding until a person accepts\n\n- \[0001 Use REST\]\(0001-use-rest\.md\) — kickoff\n\n<!-- naso:decisions:end -->/);
+  });
+});
+
+test('a directory passed as --applies does not change how printed commands are spelled', async () => {
+  // In the field, `decide --applies supabase/migrations/` printed `pnpm dlx naso-dev decisions
+  // accept` while every other decide in the same repository printed `pnpm exec`: the bin read
+  // the --applies directory as the repository, found no package.json there, and spelled the
+  // command for a repository without naso-dev installed.
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'package.json', JSON.stringify({ name: 'x', packageManager: 'pnpm@9.12.2', devDependencies: { 'naso-dev': '^1.5.3' } }));
+    await put(dir, 'supabase/migrations/0001.sql', 'select 1;\n');
+    const listed = await naso(dir, ['decide', '--title', 'Use RLS', '--decision', 'RLS.', '--source', 'kickoff', '--applies', 'src/,supabase/']);
+    const single = await naso(dir, ['decide', '--title', 'Use helpers', '--decision', 'Helpers.', '--source', 'kickoff', '--applies', 'supabase/migrations/']);
+    assert.match(listed.stdout, /accepts it with: pnpm exec naso-dev decisions accept 0001/, listed.stdout + listed.stderr);
+    assert.match(single.stdout, /accepts it with: pnpm exec naso-dev decisions accept 0002/, single.stdout + single.stderr);
   });
 });

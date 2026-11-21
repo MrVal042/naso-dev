@@ -19,6 +19,7 @@ import {
   read,
   exists,
   seedProject,
+  readBriefing,
 } from './helpers.mjs';
 
 test('the README documents the bare command and not the retired pair', async () => {
@@ -146,9 +147,9 @@ test('the package is named naso-dev and the bin matches it', async () => {
 
 test('package metadata points at the repository and gates a publish on the tests', async () => {
   const pkg = JSON.parse(await readFile(path.join(PACKAGE_ROOT, 'package.json'), 'utf8'));
-  assert.match(pkg.repository.url, /github\.com\/MrVal042\/\.naso/);
-  assert.match(pkg.bugs.url, /github\.com\/MrVal042\/\.naso\/issues/);
-  assert.ok(pkg.homepage.startsWith('https://github.com/MrVal042/.naso'));
+  assert.match(pkg.repository.url, /github\.com\/MrVal042\/naso-dev\.git$/);
+  assert.match(pkg.bugs.url, /github\.com\/MrVal042\/naso-dev\/issues/);
+  assert.ok(pkg.homepage.startsWith('https://github.com/MrVal042/naso-dev'));
   assert.equal(pkg.scripts.prepublishOnly, 'node --test test/*.test.mjs');
   assert.equal(pkg.scripts.test, 'node --test test/*.test.mjs');
   for (const wanted of ['bin', 'tooling', 'VERSION', 'README.md', 'LICENSE']) {
@@ -309,7 +310,7 @@ test('refresh never edits the briefing prose', async () => {
     await writeFile(path.join(dir, AGENTS), edited, 'utf8');
 
     await script('refresh');
-    const after = await read(dir, AGENTS);
+    const after = await readBriefing(dir);
     assert.ok(after.includes('I reworded this heading myself'), 'refresh overwrote hand-written prose');
   });
 });
@@ -354,11 +355,28 @@ test('refresh says so when AGENTS.md was stamped by a newer NASO, and leaves the
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     await bare(['--yes']);
-    const text = (await read(dir, AGENTS)).replace(/<!-- version: .+ -->/, '<!-- version: 9.9.9 -->');
+    const text = (await readBriefing(dir)).replace(/<!-- version: .+ -->/, '<!-- version: 9.9.9 -->');
     await put(dir, AGENTS, text);
     const res = await script('refresh');
     assert.match(res.stdout, /stamped 9\.9\.9, newer than this tool/);
     assert.ok(!/already stamped/.test(res.stdout));
-    assert.match(await read(dir, AGENTS), /<!-- version: 9\.9\.9 -->/);
+    assert.match(await readBriefing(dir), /<!-- version: 9\.9\.9 -->/);
+  });
+});
+
+test('config.json records the version setup ran with by that name, and doctor says so', async () => {
+  await withRepo(async ({ dir, git, bare, script }) => {
+    await seedProject(dir, git);
+    assert.equal((await bare(['--yes'])).code, 0);
+    const config = JSON.parse(await read(dir, '.naso/config.json'));
+    assert.ok(config.setupVersion, 'setupVersion is written');
+    assert.equal('version' in config, false, 'no field that reads as the current version');
+    let doctor = await script('doctor');
+    assert.match(doctor.stdout, new RegExp(`\\.naso/config\\.json\\s+setup ran with ${config.setupVersion.replace(/\./g, '\\.')}`));
+    // A config written before 1.5.3 is read the same way.
+    const { setupVersion, ...rest } = config;
+    await writeFile(path.join(dir, '.naso/config.json'), JSON.stringify({ version: '1.5.0', ...rest }, null, 2));
+    doctor = await script('doctor');
+    assert.match(doctor.stdout, /\.naso\/config\.json\s+setup ran with 1\.5\.0/);
   });
 });

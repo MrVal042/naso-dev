@@ -4,16 +4,24 @@
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { stat } from 'node:fs/promises';
-import { toolVersion, SUPPORT_EMAIL, pathExists, nasoCommand, setNasoTarget } from '../tooling/lib.mjs';
+import { toolVersion, SUPPORT_EMAIL, pathExists, nasoCommand, setNasoTarget, parseArgs } from '../tooling/lib.mjs';
 
 const TOOL_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'tooling');
 
 const COMMANDS = {
   briefing: { module: 'briefing.mjs', blurb: 'Regenerate or re-verify the AGENTS.md briefing' },
   refresh: { module: 'refresh.mjs', blurb: 'Re-vendor the tooling, move the version stamp, reinstall the hook' },
+  review: { module: 'review.mjs', blurb: 'Print the prompt that has your coding agent review and correct NASO here' },
   guide: { module: 'guide.mjs', blurb: 'Guide for one area, or --tour for a read-through of the whole briefing' },
   validate: { module: 'validate.mjs', blurb: 'Pre-commit gate: secrets, scope, format, lint, briefing' },
   doctor: { module: 'doctor.mjs', blurb: 'Diagnose the environment and the install' },
+  handoff: { module: 'handoff.mjs', blurb: 'Create, add to, trim or print the handoff between sessions' },
+  lesson: { module: 'lessons.mjs', fn: 'lessonMain', blurb: 'Record what a session learned: one file, one index line' },
+  lessons: { module: 'lessons.mjs', blurb: 'Print the lessons index, or audit it for stale, duplicate or contradicting lessons' },
+  agents: { module: 'agents.mjs', blurb: 'Point Cursor, Copilot, Gemini or Windsurf at AGENTS.md, one line each' },
+  workspace: { module: 'workspace.mjs', blurb: 'Brief a folder that holds several repositories, without touching them' },
+  claude: { module: 'claude.mjs', blurb: 'Claude Code extras, opt-in: deny rules, session hooks, skills' },
+  stats: { module: 'stats.mjs', blurb: 'Estimate the tokens an agent loads at session start, and the largest parts' },
   decide: { module: 'decisions.mjs', fn: 'decideMain', blurb: 'Record a decision the team made, with where it was made' },
   decisions: { module: 'decisions.mjs', blurb: 'List, accept, reject, supersede or audit recorded decisions' },
 };
@@ -43,23 +51,20 @@ async function usage() {
   console.log('Every command accepts --help. Support: ' + SUPPORT_EMAIL);
 }
 
-/** Flags whose next argument is a value, not a directory. */
-const VALUE_FLAGS = new Set(['--exclude', '--hook-action', '--scope']);
-
 /**
- * The repository a run is about: the last argument that is a directory, or the working
- * directory. The last, because `guide src .` names an area first and the repository after.
- * Every command NASO prints for that repository is spelled in its package manager.
+ * The repository a run is about: the last positional argument that is a directory, or the
+ * working directory. The last, because `guide src .` names an area first and the repository
+ * after. Every command NASO prints for that repository is spelled in its package manager.
+ *
+ * Positional as the commands themselves parse it. A hand-kept list of value flags missed
+ * decide's `--applies supabase/migrations/`: the directory became the target, it had no
+ * package.json, and that one decide printed `pnpm dlx` where the others printed `pnpm exec`.
  */
 async function targetOf(args) {
+  const { positional } = parseArgs(args, { valued: ['decide', 'lesson'].includes(args[0]) ? ['why'] : [] });
   let found = null;
-  for (let i = 0; i < args.length; i++) {
-    if (VALUE_FLAGS.has(args[i])) {
-      i++;
-      continue;
-    }
-    if (args[i].startsWith('-')) continue;
-    if ((await stat(args[i]).catch(() => null))?.isDirectory()) found = args[i];
+  for (const arg of positional) {
+    if ((await stat(arg).catch(() => null))?.isDirectory()) found = arg;
   }
   return found;
 }

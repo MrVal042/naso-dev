@@ -2,9 +2,8 @@
 // Built entirely on Node.js core modules — no npm packages.
 
 import { access, readFile, readdir, constants } from 'node:fs/promises';
-import { realpathSync, readFileSync, existsSync } from 'node:fs';
+import { realpathSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,14 +27,6 @@ export async function readJSONFile(filePath) {
   }
 }
 
-/** Return the first candidate filename that exists directly under cwd. */
-export async function firstExisting(cwd, candidates) {
-  for (const name of candidates) {
-    if (await pathExists(path.join(cwd, name))) return name;
-  }
-  return null;
-}
-
 /** Return every candidate filename that exists directly under cwd. */
 export async function allExisting(cwd, candidates) {
   const found = [];
@@ -51,14 +42,112 @@ export async function allExisting(cwd, candidates) {
  * output directly to the parent process instead (useful for lint/test/tsc).
  * Never throws — command failures and spawn errors both resolve normally.
  */
+/** An environment variable by name, in any case: Windows has `Path`, not `PATH`. */
+function envValue(env, name) {
+  const key = Object.keys(env ?? {}).find((candidate) => candidate.toUpperCase() === name);
+  return key ? env[key] : undefined;
+}
+
+function isFileSync(candidate) {
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** What cmd.exe reads as syntax outside quotes. Escaped with ^, quotes included. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/**
+ * The program part of a cmd.exe line: every metacharacter escaped with ^, no quotes. A
+ * folder called "a&b" would otherwise end the command at the &.
+ */
+export function escapeCommand(file) {
+  return String(file).replace(CMD_META, '^$1');
+}
+
+/**
+ * One argument for a cmd.exe line, escaped the way cross-spawn does (https://qntm.org/cmd).
+ *
+ * First quoted for the program's own parser (MSVCRT rules): backslashes before a quote or
+ * at the end are doubled, and an inner quote becomes \". Then every metacharacter, the
+ * quotes too, gets a ^, so cmd.exe reads none of it as syntax: no &, |, < or > can start a
+ * command and no %NAME% is expanded. Escaped quotes also mean cmd.exe never enters a
+ * quoted state where ^ would stop working.
+ *
+ * `twice` escapes again, for a shim that passes %* on to another program (passesArgsOn):
+ * cmd.exe parses the line once to start the shim and again when the shim runs its own line.
+ */
+export function escapeArgument(arg, twice = false) {
+  let quoted = String(arg)
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\*)$/, '$1$1');
+  quoted = `"${quoted}"`.replace(CMD_META, '^$1');
+  return twice ? quoted.replace(CMD_META, '^$1') : quoted;
+}
+
+/** Package managers whose Windows .cmd shim hands %* to node. */
+const ARG_FORWARDING_SHIMS = new Set(['npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'yarnpkg', 'bun', 'bunx', 'corepack']);
+
+/**
+ * Whether a .cmd re-parses its arguments by passing %* on to another program, so cmd.exe
+ * reads them a second time and they need escaping twice. True for the package-manager
+ * shims and for every node_modules\\.bin shim (cross-spawn's rule). A plain .cmd is escaped
+ * once: escaping it twice would hand it literal carets.
+ */
+export function passesArgsOn(file) {
+  const normal = String(file).replace(/\//g, '\\');
+  if (/node_modules\\\.bin\\[^\\]+\.cmd$/i.test(normal)) return true;
+  return /\.cmd$/i.test(normal) && ARG_FORWARDING_SHIMS.has(path.win32.basename(normal, path.win32.extname(normal)).toLowerCase());
+}
+
+/**
+ * How to start `cmd` on this platform: `{ cmd, args, shell, verbatim }` for spawn.
+ *
+ * Off Windows it is the command as given, with no shell. On Windows the command is looked
+ * up on Path in PATHEXT order, as cmd.exe would. An .exe runs directly and nothing reads
+ * its arguments but the program. A .cmd or .bat (npm, npx, pnpm, yarn, bun) cannot: Node
+ * 18.20.2, 20.12.2 and 21.7.3 and later refuse to spawn one without a shell (EINVAL), after
+ * CVE-2024-27980. Quoting alone is not enough there, because cmd.exe still reads %, ^, &,
+ * |, <, >, ( ) and quotes as syntax. So NASO runs `%ComSpec% /d /s /c "<line>"` itself,
+ * with every part escaped (escapeCommand, escapeArgument) and `windowsVerbatimArguments`
+ * so Node adds no quoting of its own. /d skips AutoRun commands from the registry. A
+ * command not found is left as it is, for spawn to report the way it always has.
+ */
+export function spawnPlan(cmd, args = [], { platform = process.platform, env = process.env, isFile = isFileSync } = {}) {
+  const asIs = { cmd, args, shell: false, verbatim: false };
+  if (platform !== 'win32') return asIs;
+  const win = path.win32;
+  const exts = String(envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const hasExt = exts.some((ext) => cmd.toUpperCase().endsWith(ext.toUpperCase()));
+  const names = hasExt ? [cmd] : exts.map((ext) => `${cmd}${ext}`);
+  const dirs = /[\\/]/.test(cmd) ? [''] : String(envValue(env, 'PATH') ?? '').split(';').filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = dir ? win.join(dir, name) : name;
+      if (!isFile(candidate)) continue;
+      if (/\.(cmd|bat)$/i.test(candidate)) {
+        const twice = passesArgsOn(candidate);
+        const line = [escapeCommand(candidate), ...args.map((arg) => escapeArgument(arg, twice))].join(' ');
+        return { cmd: envValue(env, 'COMSPEC') || 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], shell: false, verbatim: true };
+      }
+      return { cmd: candidate, args, shell: false, verbatim: false };
+    }
+  }
+  return asIs;
+}
+
 export function run(cmd, args = [], opts = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, {
+      const plan = spawnPlan(cmd, args);
+      child = spawn(plan.cmd, plan.args, {
         cwd: opts.cwd ?? process.cwd(),
         stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-        shell: false,
+        shell: plan.shell,
+        windowsVerbatimArguments: plan.verbatim,
         env: process.env,
       });
     } catch (err) {
@@ -95,6 +184,22 @@ const LOCKFILE_MANAGERS = [
   ['package-lock.json', 'npm'],
   ['npm-shrinkwrap.json', 'npm'],
 ];
+
+/**
+ * The manager a packageManager field names, unless the lockfiles contradict it.
+ *
+ * `exists(file)` answers for the repository root. A field whose manager has no lockfile
+ * while another manager's lockfile is there was never adopted: in the field a pnpm pin sat
+ * over a maintained package-lock.json, every doc said npm, and the briefing said pnpm.
+ * Returns `{ name, overruledBy }`, where overruledBy is the lockfile that wins, or null.
+ */
+function fieldManager(field, exists) {
+  const name = KNOWN_PACKAGE_MANAGERS.find((pm) => String(field ?? '').startsWith(`${pm}@`)) ?? null;
+  if (!name) return null;
+  const own = LOCKFILE_MANAGERS.filter(([, pm]) => pm === name).some(([file]) => exists(file));
+  const other = own ? null : LOCKFILE_MANAGERS.find(([file, pm]) => pm !== name && exists(file));
+  return { name, overruledBy: other ? { file: other[0], name: other[1] } : null };
+}
 
 // ---------------------------------------------------------------------------
 // The branch-name convention the repository wrote down
@@ -169,7 +274,8 @@ function runnerFacts() {
     pkg = null;
   }
   const field = String(pkg?.packageManager ?? '');
-  let pm = KNOWN_PACKAGE_MANAGERS.find((name) => field.startsWith(`${name}@`)) ?? null;
+  const pinned = fieldManager(field, (file) => existsSync(path.join(dir, file)));
+  let pm = pinned ? (pinned.overruledBy?.name ?? pinned.name) : null;
   if (!pm) pm = LOCKFILE_MANAGERS.find(([file]) => existsSync(path.join(dir, file)))?.[1] ?? null;
   if (!pm) {
     const agent = String(process.env.npm_config_user_agent ?? '').split('/')[0];
@@ -269,9 +375,19 @@ export async function packageManagerFromCI(cwd) {
  */
 export async function detectPackageManager(cwd, pkg) {
   if (pkg?.packageManager) {
-    const name = String(pkg.packageManager).split('@')[0];
-    if (KNOWN_PACKAGE_MANAGERS.includes(name)) {
-      return { name, source: 'field', evidence: `package.json "packageManager": ${pkg.packageManager}` };
+    const present = new Set();
+    for (const [file] of LOCKFILE_MANAGERS) if (await pathExists(path.join(cwd, file))) present.add(file);
+    const pinned = fieldManager(pkg.packageManager, (file) => present.has(file));
+    if (pinned?.overruledBy) {
+      const ownLock = LOCKFILE_MANAGERS.find(([, pm]) => pm === pinned.name)[0];
+      return {
+        name: pinned.overruledBy.name,
+        source: 'lock',
+        evidence: `${pinned.overruledBy.file}; package.json "packageManager" names ${pinned.name}, but there is no ${ownLock}`,
+      };
+    }
+    if (pinned) {
+      return { name: pinned.name, source: 'field', evidence: `package.json "packageManager": ${pkg.packageManager}` };
     }
   }
 
@@ -330,44 +446,6 @@ export async function hasLocalBin(cwd, bin) {
   return pathExists(path.join(cwd, 'node_modules', '.bin', binName));
 }
 
-/** Collect git branch, working-tree status, and ahead/behind vs upstream. Null if not a repo. */
-export async function getGitInfo(cwd) {
-  const isRepo = await run('git', ['rev-parse', '--is-inside-work-tree'], { cwd });
-  if (!isRepo.ok) return null;
-
-  const branchRes = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
-  const branch = branchRes.ok ? branchRes.stdout.trim() : 'unknown';
-
-  const statusRes = await run('git', ['status', '--porcelain'], { cwd });
-  const changes = statusRes.ok ? statusRes.stdout.split('\n').filter(Boolean) : [];
-
-  const upstreamRes = await run(
-    'git',
-    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
-    { cwd },
-  );
-
-  let upstream = null;
-  let ahead = 0;
-  let behind = 0;
-
-  if (upstreamRes.ok) {
-    upstream = upstreamRes.stdout.trim();
-    const countRes = await run(
-      'git',
-      ['rev-list', '--left-right', '--count', `${upstream}...HEAD`],
-      { cwd },
-    );
-    if (countRes.ok) {
-      const [b, a] = countRes.stdout.trim().split(/\s+/).map(Number);
-      behind = b || 0;
-      ahead = a || 0;
-    }
-  }
-
-  return { branch, changes, upstream, ahead, behind };
-}
-
 /** Split NUL-delimited git output into fields, dropping the empty tail. */
 export function splitNul(stdout) {
   return String(stdout).split('\0').filter((field) => field.length > 0);
@@ -409,22 +487,6 @@ export function parseGitStatusPorcelainZ(raw) {
   return entries;
 }
 
-/** Parse `git status --porcelain`, newline form. Kept for the doctor and for tests. */
-export function parseGitStatusPorcelain(raw) {
-  return raw
-    .split('\n')
-    .map((line) => line.replace(/\r$/, ''))
-    .filter(Boolean)
-    .map((line) => {
-      const status = line.slice(0, 2).trim() || '??';
-      const rawPath = line.slice(3).trim();
-      const filePath = rawPath.includes(' -> ')
-        ? (rawPath.split(' -> ').at(-1)?.trim() ?? rawPath)
-        : rawPath;
-      return { status, path: filePath, from: null };
-    });
-}
-
 /** Paths currently staged for commit (added/copied/modified/renamed — not deleted). */
 export async function getStagedFiles(cwd) {
   const res = await run(
@@ -463,6 +525,14 @@ const BOOLEAN_FLAGS = new Set([
   'save-dev',
   'accept',
   'discard-edits',
+  'no-ignore-files',
+  'json',
+  'deny',
+  'hooks',
+  'skills',
+  'claude-deny',
+  'claude-hooks',
+  'claude-skills',
 ]);
 
 /** Single-letter spellings, mapped to the long flag they stand for. */
@@ -479,8 +549,12 @@ const SHORT_FLAGS = new Map([
  * holds switches; `values` holds the last value seen for each key, so `--scope src,docs`
  * works without a bespoke parser; `lists` holds every value seen for each key, in order,
  * for options that repeat (`--exclude a --exclude b`).
+ *
+ * `valued` names options that take a value in this command even though another command
+ * uses them as a switch: setup's `--why` prints the rationale, decide's `--why "…"` is the
+ * reason. Read as a switch there, the reason became the target directory.
  */
-export function parseArgs(argv) {
+export function parseArgs(argv, { valued = [] } = {}) {
   const flags = new Set();
   const values = new Map();
   const lists = new Map();
@@ -507,7 +581,7 @@ export function parseArgs(argv) {
       setValue(body.slice(0, eq), body.slice(eq + 1));
       continue;
     }
-    if (BOOLEAN_FLAGS.has(body)) {
+    if (BOOLEAN_FLAGS.has(body) && !valued.includes(body)) {
       flags.add(body);
       continue;
     }
@@ -540,37 +614,9 @@ export function listOption(lists, key) {
 // Briefing coverage
 // ---------------------------------------------------------------------------
 
-// Root-level entries that never say anything about a codebase's shape.
-const ROOT_NOISE = new Set([
-  '.editorconfig',
-  '.gitattributes',
-  '.gitignore',
-  '.gitkeep',
-  '.npmrc',
-  '.nvmrc',
-  'license',
-  'licence',
-  'notice',
-  'readme',
-]);
-
 // Directories whose presence is not news about the repo's structure.
 const NOISY_DIR_PATTERN =
   /^(node_modules|dist|build|out|coverage|vendor|__pycache__|target|\.venv|venv|\.next|\.nuxt|\.output|\.turbo|\.svelte-kit|\.gradle|\.idea|\.vscode|\.cache|tmp|temp|logs?)$/i;
-
-/**
- * Is this root-level filename noise rather than structure?
- *
- * The extension is ignored, because `README.md`, `LICENSE` and `NOTICE.txt` are
- * the same three files wearing different hats — and a briefing that lists
- * `README.md` as an "area" has told the reader nothing.
- */
-export function isRootNoise(name) {
-  const base = name.toLowerCase();
-  if (ROOT_NOISE.has(base)) return true;
-  const ext = path.extname(base);
-  return Boolean(ext) && ROOT_NOISE.has(base.slice(0, -ext.length));
-}
 
 /** Is this directory name build output or tooling rather than project structure? */
 export function isNoisyDir(name) {
@@ -594,8 +640,17 @@ export function isNoisyDir(name) {
 export function coversUnit(briefingText, unit) {
   if (!briefingText || !unit) return false;
   const needle = escapeRegExp(unit);
-  return new RegExp(`(^|[^A-Za-z0-9_./-])${needle}`, 'i').test(briefingText);
+  // The line saying where the decisions list is names a path in docs/ without describing
+  // docs/; counting it hid the area line the first `decide` should have earned.
+  const text = String(briefingText)
+    .split('\n')
+    .filter((line) => !line.startsWith(DECISIONS_LEAD))
+    .join('\n');
+  return new RegExp(`(^|[^A-Za-z0-9_./-])${needle}`, 'i').test(text);
 }
+
+/** The opening words of the Decisions section's lead line in AGENTS.md; see decisions.mjs. */
+export const DECISIONS_LEAD = 'Decisions the team already made are recorded one per file, with who decided and where.';
 
 /** Escape a string for literal use inside a RegExp. */
 export function escapeRegExp(value) {
@@ -992,54 +1047,6 @@ export function status(kind, message) {
 // Prompts
 // ---------------------------------------------------------------------------
 
-/** Ask a yes/no question. Returns the default when the answer is just Enter. */
-export async function promptYesNo(question, { defaultYes = false } = {}) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const hint = defaultYes ? 'Y/n' : 'y/N';
-    const answer = (await rl.question(`${question} [${hint}] `)).trim().toLowerCase();
-    if (answer === '') return defaultYes;
-    return answer === 'y' || answer === 'yes';
-  } finally {
-    rl.close();
-  }
-}
-
-/**
- * Ask the user to pick one of a numbered list. Returns the chosen index.
- *
- * Accepts the number, or the first few letters of a label, because typing
- * "2" is faster than typing a whole label and typing a label is faster than
- * counting down a list of eight.
- */
-export async function promptChoice(question, choices) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    console.log(question);
-    choices.forEach((choice, index) => {
-      console.log(`  ${index + 1}) ${choice.label}`);
-    });
-    for (;;) {
-      const answer = (await rl.question(`Choose 1-${choices.length} [1]: `)).trim();
-      if (answer === '') return 0;
-
-      const asNumber = Number.parseInt(answer, 10);
-      if (String(asNumber) === answer && asNumber >= 1 && asNumber <= choices.length) {
-        return asNumber - 1;
-      }
-
-      const byLabel = choices.findIndex((choice) =>
-        choice.label.toLowerCase().startsWith(answer.toLowerCase()),
-      );
-      if (byLabel !== -1) return byLabel;
-
-      console.log(`  "${answer}" is not one of the options.`);
-    }
-  } finally {
-    rl.close();
-  }
-}
-
 /**
  * A support request pre-filled with everything a maintainer would ask for.
  *
@@ -1088,3 +1095,64 @@ async function gitVersionOrUnknown() {
   return res.ok ? res.stdout.trim() : 'not found';
 }
 
+const RENOVATE_FILES = ['renovate.json', 'renovate.json5', '.renovaterc', '.renovaterc.json', '.github/renovate.json', '.github/renovate.json5', '.gitlab/renovate.json'];
+const RENOVATE_PINS = /rangeStrategy["']?\s*:\s*["']pin["']|:pin(?:AllExceptPeerDependencies|Dependencies|DevDependencies|Versions)\b|config:js-app|":js-app"/;
+
+/**
+ * Whether this repository pins exact versions, so naso-dev is recorded as `1.5.0`, not `^1.5.0`.
+ *
+ * Read from what the repository says: `save-exact` in .npmrc, a Renovate config that pins,
+ * or a package.json whose every dependency is already an exact version. A caret range in a
+ * repository that pins is a line its own review would reject.
+ */
+export async function pinsExactVersions(cwd, pkg) {
+  const npmrc = await readFile(path.join(cwd, '.npmrc'), 'utf8').catch(() => '');
+  if (/^\s*save-exact\s*=\s*true\s*$/m.test(npmrc)) return true;
+  for (const name of RENOVATE_FILES) {
+    if (RENOVATE_PINS.test(await readFile(path.join(cwd, name), 'utf8').catch(() => ''))) return true;
+  }
+  if (pkg?.renovate && RENOVATE_PINS.test(JSON.stringify(pkg.renovate))) return true;
+  const specs = Object.values({ ...(pkg?.dependencies ?? {}), ...(pkg?.devDependencies ?? {}) }).filter((spec) => typeof spec === 'string');
+  return specs.length >= 3 && specs.every((spec) => /^\d+\.\d+\.\d+(?:[-+][\w.-]+)?$/.test(spec));
+}
+
+/** The command that records naso-dev at exactly `version` as a dev dependency, for this package manager. */
+export function exactDevInstallText(pm, version) {
+  const spec = `naso-dev@${version}`;
+  return {
+    pnpm: `pnpm add --save-dev --save-exact ${spec}`,
+    yarn: `yarn add --dev --exact ${spec}`,
+    bun: `bun add --dev --exact ${spec}`,
+  }[pm] ?? `npm install --save-dev --save-exact ${spec}`;
+}
+
+/**
+ * The naso-dev version package.json and its npm lockfile record: `{ spec, installed }`, or
+ * null when package.json does not list it. `installed` is null without a readable lockfile.
+ */
+export async function recordedNasoVersion(cwd) {
+  const pkg = await readJSONFile(path.join(cwd, 'package.json'));
+  const spec = pkg?.devDependencies?.['naso-dev'] ?? pkg?.dependencies?.['naso-dev'] ?? null;
+  if (!spec) return null;
+  const lock = await readJSONFile(path.join(cwd, 'package-lock.json'));
+  const installed = lock?.packages?.['node_modules/naso-dev']?.version ?? null;
+  return { pkg, spec, installed };
+}
+
+/**
+ * What to run when package.json and the vendored toolset record different naso-dev versions.
+ *
+ * The direction decides the command. A toolset behind the pin is brought up with the pinned
+ * version's own refresh; a toolset ahead of it means a teammate upgraded, so the pin moves,
+ * because a refresh from the pinned install refuses to move the toolset back. "Run refresh
+ * with the version the team uses" left the reader to guess which way to go.
+ */
+export function pinAdvice({ recorded, vendored, pm }) {
+  if (!recorded || !vendored) return null;
+  const pinned = recorded.installed ?? recorded.spec.replace(/^[\^~=v]+/, '');
+  if (pinned === vendored) return null;
+  const said = `package.json records naso-dev ${recorded.spec}${recorded.installed ? ` (installed ${recorded.installed})` : ''} and .naso/tooling/ is ${vendored}`;
+  return compareVersions(vendored, pinned) < 0
+    ? `${said}, behind it. \`${nasoCommand({ version: pinned })} refresh\` brings the toolset up to ${pinned}.`
+    : `${said}, ahead of it. \`${exactDevInstallText(pm, vendored)}\` records the toolset's version (refresh refuses to move the toolset back without --force).`;
+}

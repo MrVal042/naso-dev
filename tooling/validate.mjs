@@ -30,6 +30,7 @@
 // Zero external dependencies — Node.js core modules only.
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { locateHandoff, nowLineCount, NOW_CAP } from './handoff.mjs';
 import path from 'node:path';
 import {
   pathExists,
@@ -48,7 +49,6 @@ import {
   compareVersions,
   toolVersion,
   coversUnit,
-  isRootNoise,
   isNoisyDir,
   isMainModule,
   SUPPORT_EMAIL,
@@ -633,6 +633,21 @@ async function checkDecisionRecords(cwd, stagedFiles, { append }) {
   console.log(`  Refreshed ${index} and staged it with this commit.`);
 }
 
+/**
+ * A handoff whose NOW has outgrown its cap. A warning and never a refusal: the handoff is
+ * notes, and a commit is not the moment to make somebody tidy them. It names the command
+ * that fixes it. No handoff, no row: most commits have nothing to say about it.
+ */
+async function checkHandoff(cwd) {
+  const located = await locateHandoff(cwd).catch(() => null);
+  const text = located ? await readFile(located.file, 'utf8').catch(() => null) : null;
+  if (text === null) return;
+  const lines = nowLineCount(text);
+  if (lines > NOW_CAP) {
+    record('Handoff', 'warn', `NOW is ${lines} lines, over its cap of ${NOW_CAP}; run: ${nasoCommand()} handoff trim`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Modes
 // ---------------------------------------------------------------------------
@@ -738,6 +753,7 @@ async function runStaged(cwd, pkg, pm, { append, prefixes, strictScope }) {
     record('AGENTS.md update', 'skip', '--no-append');
   }
   await checkDecisionRecords(cwd, stagedFiles, { append });
+  await checkHandoff(cwd);
 
   printSummary();
 }
@@ -761,6 +777,10 @@ async function runFull(cwd, pkg, pm, { prefixes, strictScope }) {
   if (scripts.typecheck) {
     const [cmd, args] = pmRunCommand(pm, 'typecheck');
     await runStep('TypeScript', cmd, args, cwd);
+  } else if (/^\s*tsc(?:\s+(?:--noEmit|-p\s+\S+|--project\s+\S+))*\s*$/.test(String(scripts.lint ?? '')) && /--noEmit/.test(scripts.lint)) {
+    // A "lint" that is `tsc --noEmit` already ran above; running tsc again doubles the slowest
+    // step and reports the same errors twice.
+    record('TypeScript', 'skip', 'the "lint" script is the type-check');
   } else if (hasTsconfig && (await hasLocalBin(cwd, 'tsc'))) {
     const [cmd, args] = pmExecCommand(pm, 'tsc', ['--noEmit']);
     await runStep('TypeScript', cmd, args, cwd);

@@ -36,7 +36,9 @@ import { describeHook } from './install.mjs';
 import { detectStack } from './stack.mjs';
 import { parseIgnorePatterns, blockEdited as isBlockEdited } from './scan.mjs';
 import { NASO_DIR, isVendored, vendoredVersion } from './vendor.mjs';
-import { inspect, install, displayPlan, displayOverview, devDependencyPlan, HOOK_ACTIONS } from './setup.mjs';
+import { inspect, install, displayPlan, displayOverview, devDependencyPlan, pinsExactVersions, HOOK_ACTIONS } from './setup.mjs';
+import { codeownersOwners } from './claude.mjs';
+import { detectAgents } from './agents.mjs';
 import { colorEnabled, createStyle } from './ui.mjs';
 import { confirm, select, isCancel, note, outro } from './prompt.mjs';
 
@@ -293,7 +295,62 @@ async function ask(style, options, context, io = {}) {
     saveDev = record;
   }
 
-  return { track, noHook, force, hookAction, saveDev };
+  const extras = {};
+  // Pointers for other agents, only from the real flow (it passes `agents`). No is the
+  // default: they are files outside .naso/, and an agent detected here is offered first.
+  if (context.agents && (options.agents ?? []).length === 0) {
+    const detected = context.agents;
+    const choice = await select({
+      message: 'Point other agents at AGENTS.md? (one line each, never a copy; Claude Code gets CLAUDE.md, Codex reads AGENTS.md itself)',
+      initialValue: 'none',
+      options: [
+        { value: 'none', label: 'No' },
+        ...(detected.length > 0 ? [{ value: 'detected', label: `The ones set up here: ${detected.map((entry) => entry.label).join(', ')}`, hint: detected.map((entry) => entry.signs[0]).join(', ') }] : []),
+        { value: 'all', label: 'Cursor, Copilot, Gemini and Windsurf', hint: 'a file each' },
+      ],
+      style,
+      ...io,
+    });
+    if (isCancel(choice)) return null;
+    if (choice === 'detected') extras.agents = detected.map((entry) => entry.name);
+    if (choice === 'all') extras.agents = ['all'];
+  }
+
+  // Claude Code extras, last, and only from the real flow (it passes `claude`). Every
+  // default is No: they write into .claude/, which is the person's, and NASO works without them.
+  if (context.claude) {
+    const { owners = [], scope = [] } = context.claude;
+    if (!options.claudeDeny && (owners.length > 0 || scope.length > 0)) {
+      const choice = await select({
+        message: 'Claude Code: deny edits to paths that are not yours? (.claude/settings.local.json, this machine only)',
+        initialValue: 'none',
+        options: [
+          { value: 'none', label: 'No', hint: 'Claude Code may edit any path' },
+          ...owners.slice(0, 8).map((owner) => ({ value: `owner:${owner}`, label: `I am ${owner}`, hint: 'deny what CODEOWNERS gives to others' })),
+          ...(scope.length > 0 ? [{ value: 'scope', label: 'Use NASO_SCOPE', hint: scope.join(', ') }] : []),
+        ],
+        style,
+        ...io,
+      });
+      if (isCancel(choice)) return null;
+      if (choice !== 'none') {
+        extras.claudeDeny = true;
+        extras.owners = choice.startsWith('owner:') ? [choice.slice(6)] : [];
+      }
+    }
+    if (!options.claudeHooks) {
+      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: false, style, ...io });
+      if (isCancel(hooks)) return null;
+      extras.claudeHooks = hooks;
+    }
+    if (!options.claudeSkills) {
+      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: false, style, ...io });
+      if (isCancel(skills)) return null;
+      extras.claudeSkills = skills;
+    }
+  }
+
+  return { track, noHook, force, hookAction, saveDev, ...extras };
 }
 
 /**
@@ -401,6 +458,10 @@ Options:
                      or a core.hooksPath directory git tracks (default: skip)
   --save-dev         record naso-dev in devDependencies with this repository's
                      package manager (asked when there is a terminal)
+  --agents <names>   point other agents at AGENTS.md: cursor, copilot, gemini,
+                     windsurf, or all (asked when there is a terminal)
+  --no-ignore-files  leave .prettierignore, .dockerignore and the ESLint config
+                     as they are (review then names the line each one needs)
   --yes              accept the plan without asking; for CI, scripts and agents
   --dry-run          print the plan and stop
   --why              the long-form rationale for doing this at all
@@ -409,12 +470,8 @@ Options:
 With no terminal and no --yes, this prints the plan, writes nothing, and exits 2.
 --dry-run prints the same plan and exits 0.
 
-Other commands:
-  briefing   regenerate or re-verify the ${AGENTS_FILE} briefing
-  refresh    re-vendor the toolset and move the version stamp
-  guide      guide for one area, or --tour for a read-through
-  validate   the pre-commit gate, run by hand
-  doctor     diagnose the environment and the install`);
+Other commands (briefing, review, handoff, stats, agents, workspace and the
+rest): ${nasoCommand()} --help`);
     return;
   }
 
@@ -429,6 +486,12 @@ Other commands:
     hookAction: values.get('hook-action') ?? null,
     saveDev: flags.has('save-dev'),
     discardEdits: flags.has('discard-edits'),
+    claudeDeny: flags.has('claude-deny'),
+    claudeHooks: flags.has('claude-hooks'),
+    claudeSkills: flags.has('claude-skills'),
+    agents: listOption(lists, 'agents'),
+    owners: listOption(lists, 'owners'),
+    noIgnoreFiles: flags.has('no-ignore-files'),
   };
 
   if (options.hookAction !== null && !HOOK_ACTIONS.includes(options.hookAction)) {
@@ -516,8 +579,10 @@ Other commands:
 
   if (!options.yes) {
     const pkg = await readJSONFile(path.join(cwd, 'package.json'));
-    const devDependency = devDependencyPlan(pkg, (await detectPackageManager(cwd, pkg)).name, version);
-    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency });
+    const devDependency = devDependencyPlan(pkg, (await detectPackageManager(cwd, pkg)).name, version, { exact: await pinsExactVersions(cwd, pkg) });
+    const claude = { owners: await codeownersOwners(cwd).catch(() => []), scope: String(process.env.NASO_SCOPE ?? '').split(',').map((part) => part.trim()).filter(Boolean) };
+    const agents = (await detectAgents(cwd)).filter((entry) => !entry.native);
+    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency, claude, agents });
     if (answered === null) {
       prompts.done(style.warn('Cancelled. Nothing was written.'));
       return;

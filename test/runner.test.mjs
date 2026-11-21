@@ -3,10 +3,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { nasoCommand, nasoUpgradeCommand, setNasoTarget } from '../tooling/lib.mjs';
-import { BIN, exec, withRepo, put, read } from './helpers.mjs';
+import { BIN, exec, withRepo, put, read, fakeBin } from './helpers.mjs';
 
 const at = async (dir, files, agent = '') => {
   for (const [name, text] of Object.entries(files)) await put(dir, name, text);
@@ -50,15 +49,13 @@ test('nasoCommand follows the repository package manager and whether naso-dev is
 
 /** A fake pnpm that records naso-dev in devDependencies, as the real one does. */
 async function fakePnpm(dir) {
-  const bin = path.join(dir, '.fake-bin');
-  await put(
-    bin,
+  const env = await fakeBin(
+    path.join(dir, '.fake-bin'),
     'pnpm',
-    `#!/bin/sh\n${JSON.stringify(process.execPath)} -e "const fs=require('fs'),p=JSON.parse(fs.readFileSync('package.json'));` +
-      `p.devDependencies={...p.devDependencies,'naso-dev':'^0'};fs.writeFileSync('package.json',JSON.stringify(p))"\n`,
+    "const fs=require('fs'),p=JSON.parse(fs.readFileSync('package.json'));" +
+      "p.devDependencies={...p.devDependencies,'naso-dev':'^0'};fs.writeFileSync('package.json',JSON.stringify(p));\n",
   );
-  await chmod(path.join(bin, 'pnpm'), 0o755);
-  return { PATH: `${bin}${path.delimiter}${process.env.PATH}`, npm_config_user_agent: '' };
+  return { ...env, npm_config_user_agent: '' };
 }
 
 test('a pnpm repository is never told to run npx, before or after naso-dev is recorded', async () => {
@@ -74,7 +71,7 @@ test('a pnpm repository is never told to run npx, before or after naso-dev is re
     assert.equal(plain.code, 0, plain.stdout + plain.stderr);
     assert.doesNotMatch(plain.stdout, /npx naso-dev/);
     assert.match(plain.stdout, /^ {2}pnpm dlx naso-dev doctor/m);
-    assert.match(plain.stdout, /Run `pnpm dlx naso-dev briefing` and fix anything it reports/);
+    assert.match(plain.stdout, /Run `pnpm dlx naso-dev briefing` and fix everything it reports/);
     assert.match(await read(dir, '.git/hooks/pre-commit'), /Run: pnpm dlx naso-dev refresh/);
 
     const recorded = await exec(process.execPath, [BIN, dir, '--yes', '--force', '--save-dev'], dir, env);
@@ -84,4 +81,12 @@ test('a pnpm repository is never told to run npx, before or after naso-dev is re
     assert.match(after, /^ {2}pnpm exec naso-dev doctor/m, 'once installed, the installed form');
     assert.doesNotMatch(recorded.stdout, /npx naso-dev/);
   });
+});
+
+test('nasoCommand ignores a packageManager field the lockfile contradicts', async () => {
+  await withRepo(async ({ dir }) => {
+    const got = await at(dir, { 'package.json': pkg({ packageManager: 'pnpm@9.12.2', ...installed }), 'package-lock.json': '{}' }, '');
+    assert.equal(got.run, 'npx naso-dev');
+  }, { seed: false });
+  setNasoTarget(null);
 });

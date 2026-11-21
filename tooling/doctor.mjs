@@ -15,6 +15,9 @@ import {
   isMainModule,
   SUPPORT_EMAIL,
   nasoCommand,
+  recordedNasoVersion,
+  pinAdvice,
+  detectPackageManager,
 } from './lib.mjs';
 import {
   scanRepo,
@@ -24,7 +27,8 @@ import {
   NASO_END,
 } from './briefing.mjs';
 import { readHook, isNasoHook, findArtifacts, CLAUDE_FILE, claudeLoadsBriefing } from './install.mjs';
-import { NASO_DIR, readConfig, configuredExclusions, configPath, vendoredVersion } from './vendor.mjs';
+import { denyDrift, hooksHealth } from './claude.mjs';
+import { NASO_DIR, readConfig, configuredExclusions, configPath, vendoredVersion, setupVersionOf } from './vendor.mjs';
 
 const OK = 'OK';
 const WARN = 'WARN';
@@ -32,6 +36,40 @@ const FAIL = 'FAIL';
 
 function printRow(label, status, detail = '') {
   console.log(`${status.padEnd(5)}  ${label.padEnd(24)} ${detail}`);
+}
+
+const ESLINT_CONFIGS = [
+  'eslint.config.js', 'eslint.config.mjs', 'eslint.config.cjs', 'eslint.config.ts', 'eslint.config.mts', 'eslint.config.cts',
+  '.eslintrc', '.eslintrc.js', '.eslintrc.cjs', '.eslintrc.json', '.eslintrc.yml', '.eslintrc.yaml',
+];
+
+/**
+ * The repository's own ESLint, run on .naso/, and whatever it prints.
+ *
+ * Setup adds .naso/ to the config's ignores, but a config it could not edit, an opt-out, or
+ * a later rewrite of the config brings the vendored files back into `eslint .`, where ESLint 9
+ * reports their disable headers as unused. Running the linter is the only way to know. It is
+ * run with node from node_modules/eslint, so it works the same on every platform, and only
+ * when the repository has an ESLint config and an installed ESLint.
+ */
+async function eslintRow(cwd) {
+  const configs = await Promise.all(ESLINT_CONFIGS.map((name) => pathExists(path.join(cwd, name))));
+  if (!configs.some(Boolean) || !(await pathExists(path.join(cwd, NASO_DIR)))) return;
+  const bin = path.join(cwd, 'node_modules', 'eslint', 'bin', 'eslint.js');
+  if (!(await pathExists(bin))) {
+    printRow(`ESLint on ${NASO_DIR}/`, OK, 'not run: ESLint is not installed in node_modules');
+    return;
+  }
+  const res = await run(process.execPath, [bin, '--no-error-on-unmatched-pattern', `${NASO_DIR}/`], { cwd });
+  const printed = `${res.stdout}\n${res.stderr}`.trim();
+  if (!printed && res.ok) {
+    printRow(`ESLint on ${NASO_DIR}/`, OK, 'prints nothing');
+    return;
+  }
+  const lines = printed.split('\n');
+  printRow(`ESLint on ${NASO_DIR}/`, WARN, `prints ${lines.length} line${lines.length === 1 ? '' : 's'}: ${lines[0].trim()}`);
+  for (const line of lines.slice(1, 8)) if (line.trim()) console.log(`${''.padEnd(32)}${line.trim()}`);
+  console.log(`${''.padEnd(32)}Add '${NASO_DIR}/' to the ESLint config's ignores (setup does it unless --no-ignore-files).`);
 }
 
 export async function main(argv = process.argv.slice(2)) {
@@ -89,15 +127,20 @@ Support: ${SUPPORT_EMAIL}`);
   // The vendored copy is what the hook actually runs, so its absence is the single
   // most important thing this command can report.
   const vendoredVersionText = await vendoredVersion(cwd);
+  // What teammates install against what the hook runs, with the command in the right
+  // direction: the same note `briefing` prints. With that gap, it is the one command to run.
+  const recorded = await recordedNasoVersion(cwd);
+  const pinGap = recorded ? pinAdvice({ recorded, vendored: vendoredVersionText, pm: (await detectPackageManager(cwd, recorded.pkg)).name }) : null;
   if (!vendoredVersionText) {
     printRow('vendored toolset', WARN, `not found at ${NASO_DIR}/tooling/ — the hook will skip its checks`);
   } else if (compareVersions(vendoredVersionText, version) > 0) {
     printRow('vendored toolset', WARN, `${vendoredVersionText} — newer than this tool (${version}); update naso-dev`);
-  } else if (vendoredVersionText !== version) {
-    printRow('vendored toolset', WARN, `${vendoredVersionText} — behind ${version}; run \`${nasoCommand()} refresh\``);
+  } else if (vendoredVersionText !== version && !pinGap) {
+    printRow('vendored toolset', WARN, `${vendoredVersionText} — behind ${version}; run \`${nasoCommand({ version })} refresh\``);
   } else {
     printRow('vendored toolset', OK, `${NASO_DIR}/tooling/ at ${vendoredVersionText}`);
   }
+  if (pinGap) printRow('naso-dev in package.json', WARN, pinGap);
 
   const config = await readConfig(cwd);
   const excluded = configuredExclusions(config);
@@ -105,16 +148,17 @@ Support: ${SUPPORT_EMAIL}`);
     `${NASO_DIR}/config.json`,
     (await pathExists(configPath(cwd))) ? OK : WARN,
     (await pathExists(configPath(cwd)))
-      ? excluded.length > 0
-        ? `${excluded.length} area(s) excluded: ${excluded.join(', ')}`
-        : 'no areas excluded'
+      ? `setup ran with ${setupVersionOf(config) ?? 'an unrecorded version'} (refresh never rewrites it); ` +
+          (excluded.length > 0 ? `${excluded.length} area(s) excluded: ${excluded.join(', ')}` : 'no areas excluded')
       : 'not written — run setup to create it',
   );
 
   const hookPath = path.join(cwd, '.git', 'hooks', 'pre-commit');
   const hook = await readHook(cwd);
   if (!hook) {
-    printRow('pre-commit hook', WARN, 'missing');
+    // A fresh clone has everything tracked and no hook. One command installs it, and the
+    // block, the toolset README and this row all name the same one.
+    printRow('pre-commit hook', WARN, `missing; install it with \`${nasoCommand()} refresh\` (at the vendored version it changes nothing else)`);
   } else if (isNasoHook(hook)) {
     const pointsAt = hook.body.includes(`${NASO_DIR}/tooling/validate.mjs`);
     printRow(
@@ -125,6 +169,8 @@ Support: ${SUPPORT_EMAIL}`);
   } else {
     printRow('pre-commit hook', WARN, 'foreign hook (left as-is)');
   }
+
+  await eslintRow(cwd);
 
   try {
     const facts = await scanRepo(cwd);
@@ -148,6 +194,30 @@ Support: ${SUPPORT_EMAIL}`);
     printRow('Claude Code link', OK, 'CLAUDE.md loads AGENTS.md');
   } else {
     printRow('Claude Code link', WARN, 'CLAUDE.md does not load AGENTS.md — add `@AGENTS.md` to it');
+  }
+
+  const hooks = await hooksHealth(cwd).catch(() => null);
+  if (hooks) {
+    printRow('Claude hooks', hooks.ok ? OK : WARN, hooks.ok
+      ? `SessionStart and Stop in ${hooks.file} run .naso/tooling/session-hook.mjs`
+      : `${hooks.file} runs .naso/tooling/session-hook.mjs, which is missing; every session gets a hook error. Run: ${nasoCommand()} refresh`);
+  }
+
+  // Deny rules drift as CODEOWNERS changes. Only reported once they were set up: a
+  // repository that never asked for them has nothing to drift from.
+  const drift = await denyDrift(cwd).catch(() => null);
+  if (drift) {
+    if (drift.invalid) {
+      printRow('Claude deny rules', WARN, `${drift.file} is not valid JSON; Claude Code may not read it`);
+    } else if (drift.ok) {
+      printRow('Claude deny rules', OK, `${drift.expected.length} rule${drift.expected.length === 1 ? '' : 's'} match ${drift.source === 'codeowners' ? 'CODEOWNERS' : 'NASO_SCOPE'}`);
+    } else {
+      const parts = [
+        ...(drift.missing.length > 0 ? [`${drift.missing.length} path${drift.missing.length === 1 ? '' : 's'} outside your ownership not denied`] : []),
+        ...(drift.stale.length > 0 ? [`${drift.stale.length} rule${drift.stale.length === 1 ? '' : 's'} deny what is yours now`] : []),
+      ];
+      printRow('Claude deny rules', WARN, `${parts.join('; ')}. Run: ${nasoCommand()} claude --deny`);
+    }
   }
 
   const artifacts = await findArtifacts(cwd);

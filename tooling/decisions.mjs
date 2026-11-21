@@ -22,7 +22,7 @@
 
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parseArgs, pathExists, run, nasoCommand, isMainModule } from './lib.mjs';
+import { parseArgs, pathExists, run, nasoCommand, isMainModule, DECISIONS_LEAD } from './lib.mjs';
 import { withLock } from './lock.mjs';
 
 export const DECISIONS_START = '<!-- naso:decisions:start -->';
@@ -31,7 +31,7 @@ export const DECISIONS_END = '<!-- naso:decisions:end -->';
 const STATUSES = ['proposed', 'accepted', 'rejected', 'superseded', 'deprecated'];
 
 /** Folders teams already keep decision records in, most specific first. */
-const KNOWN_DIRS = [
+export const KNOWN_DECISION_DIRS = [
   'docs/decisions',
   'docs/adr',
   'docs/adrs',
@@ -52,7 +52,7 @@ const isRecord = (name) => /\.md$/i.test(name) && !/^(?:readme|index|template|ad
 /** The decisions folder: the one the repository uses, or the default it would get. */
 export async function decisionsDir(cwd) {
   const pointer = (await readFile(path.join(cwd, '.adr-dir'), 'utf8').catch(() => '')).trim();
-  for (const dir of [pointer, ...KNOWN_DIRS].filter(Boolean)) {
+  for (const dir of [pointer, ...KNOWN_DECISION_DIRS].filter(Boolean)) {
     const names = await readdir(path.join(cwd, dir)).catch(() => null);
     if (names && names.some(isRecord)) return { dir, exists: true };
   }
@@ -61,12 +61,20 @@ export async function decisionsDir(cwd) {
 
 /** A header field: `- Status: accepted`, `* Date: 2026-10-14`, or a bare `Date: …` line. */
 function field(lines, names) {
-  const pattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:\\*\\*)?(?:${names})(?:\\*\\*)?\\s*:\\s*(.+?)\\s*$`, 'i');
+  const pattern = new RegExp(`^\\s*(?:[-*]\\s*)?(?:\\*\\*)?(?:${names})(?:\\*\\*)?\\s*:(?:\\*\\*)?\\s*(.+?)\\s*$`, 'i');
   for (const line of lines) {
     const match = line.match(pattern);
     if (match) return match[1];
   }
   return null;
+}
+
+/** The first line under a `## <name>` heading, list marker and links' brackets removed. */
+function sectionFirstLine(lines, names) {
+  const at = lines.findIndex((line) => new RegExp(`^#{2,}\\s+(?:${names})\\s*$`, 'i').test(line));
+  if (at === -1) return null;
+  const first = lines.slice(at + 1).find((line) => line.trim() && !/^#/.test(line));
+  return first ? first.replace(/^\s*[-*\d.]+\s*/, '').replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').trim() || null : null;
 }
 
 /**
@@ -117,11 +125,113 @@ export function parseDecision(file, text) {
     supersededBy: supersededFromStatus ? pad(supersededFromStatus) : supersededField ? pad(supersededField) : null,
     date: field(lines, 'Date') ?? front.date ?? null,
     by: field(lines, 'Decided by|Deciders|Decider') ?? front.deciders ?? null,
-    source: field(lines, 'Source|Decided in|Origin') ?? front.source ?? null,
+    source: field(lines, 'Source|Decided in|Origin') ?? front.source ?? sectionFirstLine(lines, 'Sources?|References') ?? null,
+    decision: sectionFirstLine(lines, 'Decision'),
+    why: ((value) => (value && !/^not recorded\.?$/i.test(value) ? value : null))(sectionFirstLine(lines, 'Why|Rationale|Reason')),
     applies: list(field(lines, 'Applies to|Scope') ?? front.applies),
     supersedes: list(field(lines, 'Supersedes')).map((item) => item.match(/(\d+)/)?.[1]).filter(Boolean).map(pad),
     reviewBy: field(lines, 'Review by|Revisit by|Review date') ?? front['review-by'] ?? null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// What a source cites
+// ---------------------------------------------------------------------------
+
+/** Markdown headings outside fences, as `{ line, level, text }` with 1-based lines. */
+export function headingsOf(text) {
+  const out = [];
+  let fenced = false;
+  String(text)
+    .split('\n')
+    .forEach((raw, index) => {
+      if (/^\s*```/.test(raw)) fenced = !fenced;
+      const match = !fenced && raw.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/);
+      if (match) out.push({ line: index + 1, level: match[1].length, text: match[2].replace(/\*\*|`/g, '').trim() });
+    });
+  return out;
+}
+
+/** Lines a heading's section spans: from the heading to the line before the next one at its level or above. */
+function sectionLines(headings, at, total) {
+  const heading = headings[at];
+  const next = headings.slice(at + 1).find((other) => other.level <= heading.level);
+  const out = [];
+  for (let n = heading.line; n <= (next ? next.line - 1 : total); n++) out.push(n);
+  return out;
+}
+
+const slugOf = (text) => text.toLowerCase().replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-');
+
+/**
+ * The lines of `file` that a record's source cites, as a Set of 1-based line numbers.
+ *
+ * Read after each mention of the file, up to the next file or `;`: "line 5", "lines 5-9",
+ * "lines 3, 7 and 9", "L12-L20", "section 2" (the heading numbered 2 and everything under
+ * it), "section Security" or "§2", and a `#heading-slug` anchor. Matching only a bare line
+ * number made "docs/architecture.md section 2" cite line 2, and nothing it meant.
+ */
+export function citedLines(source, file, text) {
+  const out = new Set();
+  if (!source || !file) return out;
+  const lines = String(text ?? '').split('\n');
+  const total = lines.length - (String(text ?? '').endsWith('\n') ? 1 : 0);
+  const headings = headingsOf(text ?? '');
+  let from = source.indexOf(file);
+  while (from !== -1) {
+    const rest = source.slice(from + file.length);
+    // A longer name that starts with this one (`docs/a.md` in `docs/a.mdx`) is another file.
+    if (/^[\w-]/.test(rest)) {
+      from = source.indexOf(file, from + file.length);
+      continue;
+    }
+    const end = rest.search(/;|\s(?:[\w.-]+\/)+[\w.-]+\.\w+|\s[\w-]+\.(?:md|mdx|json|ya?ml|[cm]?[jt]sx?)\b/);
+    const segment = end === -1 ? rest : rest.slice(0, end);
+    for (const match of segment.matchAll(/\blines?\s+(\d+(?:\s*[–-]\s*\d+)?(?:\s*(?:,|and|&)\s*\d+(?:\s*[–-]\s*\d+)?)*)/gi)) {
+      for (const part of match[1].split(/\s*(?:,|and|&)\s*/)) {
+        const [a, b = a] = part.split(/\s*[–-]\s*/).map(Number);
+        for (let n = Math.min(a, b); n <= Math.max(a, b); n++) out.add(n);
+      }
+    }
+    for (const match of segment.matchAll(/(?<![A-Za-z])#?L(\d+)(?:-L?(\d+))?\b/g)) {
+      const [a, b = a] = [Number(match[1]), Number(match[2] ?? match[1])];
+      for (let n = a; n <= b; n++) out.add(n);
+    }
+    const wanted = [
+      ...[...segment.matchAll(/(?:\bsections?\s+|§\s*)(\d+(?:\.\d+)*)/gi)].map((match) => ({ number: match[1] })),
+      ...[...segment.matchAll(/\bsections?\s+["“']?([A-Za-z][^"”';,()]*?)["”']?\s*(?:[;,()]|$)/gi)].map((match) => ({ name: match[1].trim().toLowerCase() })),
+      ...[...segment.matchAll(/^#([\w-]+)/g)].map((match) => ({ slug: match[1].toLowerCase() })),
+    ];
+    headings.forEach((heading, at) => {
+      const number = heading.text.match(/^(?:section\s+)?(\d+(?:\.\d+)*)\b/i)?.[1] ?? null;
+      const hit = wanted.some(
+        (want) =>
+          (want.number && number === want.number) ||
+          (want.name && want.name.length >= 3 && heading.text.toLowerCase().includes(want.name)) ||
+          (want.slug && slugOf(heading.text) === want.slug),
+      );
+      if (hit) for (const n of sectionLines(headings, at, total)) out.add(n);
+    });
+    from = source.indexOf(file, from + file.length);
+  }
+  return out;
+}
+
+const words = (text) => String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+/**
+ * Whether a record states the same thing as a line of a doc: one text contains the other,
+ * and the shorter has at least three words, so "Testing" does not match every test rule.
+ */
+export function sameDecisionText(record, text) {
+  const row = words(text);
+  if (!row) return false;
+  return [record.title, record.decision].some((value) => {
+    const other = words(value);
+    if (!other) return false;
+    const [short, long] = other.length < row.length ? [other, row] : [row, other];
+    return short === long || (short.split(' ').length >= 3 && long.includes(short));
+  });
 }
 
 /** Every record in the decisions folder, parsed, sorted by id. */
@@ -144,6 +254,69 @@ export async function readDecisions(cwd) {
 
 /** The index file for a decisions folder. */
 export const indexFileOf = (dir) => `${dir}/README.md`;
+
+/**
+ * The opening line of the Decisions section in AGENTS.md, which says where the list is.
+ *
+ * It depends on whether the list exists yet, so it goes stale the moment the first decision
+ * is recorded. `decide` and `decisions` rewrite it, and only it; the block digest leaves it
+ * out, so that rewrite is not counted as a person's edit. No path is named for a list that
+ * is not there: a backticked path is a claim that it exists.
+ */
+export { DECISIONS_LEAD };
+
+export function decisionsLead({ dir, indexExists, records }) {
+  const index = indexFileOf(dir);
+  if (indexExists) return `${DECISIONS_LEAD} The list is \`${index}\`: one line per decision, linked to its record.`;
+  if (records.length > 0) {
+    return `${DECISIONS_LEAD} The list will be ${index}, one line per decision linked to its record, once \`${nasoCommand()} decisions sync\` writes it.`;
+  }
+  return `${DECISIONS_LEAD} No decision is recorded yet; the first one creates the list beside it.`;
+}
+
+/** The three forms decisionsLead writes, so a rewrite can tell NASO's words from a person's. */
+const LEAD_FORMS = new RegExp(
+  `^${DECISIONS_LEAD.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} (?:The list is \`[^\`]+\`: one line per decision, linked to its record\\.|` +
+    `The list will be \\S+, one line per decision linked to its record, once \`[^\`]+\` writes it\\.|` +
+    `No decision is recorded yet; the first one creates the list beside it\\.)`,
+);
+
+// The same markers scan.mjs exports; spelled here because scan.mjs imports this module.
+const BLOCK_START = '<!-- naso:start -->';
+const BLOCK_END = '<!-- naso:end -->';
+
+/** The lead line inside an AGENTS.md block, or null when there is no block or no such line. */
+export function leadLineIn(text) {
+  const start = text.indexOf(BLOCK_START);
+  const end = text.indexOf(BLOCK_END);
+  if (start === -1 || end < start) return null;
+  return text.slice(start, end).split('\n').find((line) => line.startsWith(DECISIONS_LEAD)) ?? null;
+}
+
+/**
+ * Bring the line that says where the list is up to date with the decisions on disk, in the
+ * AGENTS.md block and in the decisions guide, wherever it is. True when either changed.
+ */
+export async function refreshDecisionsLead(cwd) {
+  let changed = false;
+  const next = decisionsLead(await readDecisions(cwd));
+  // The guide is NASO's file from top to bottom, so its line is found anywhere in it.
+  const targets = [
+    { file: path.join(cwd, 'AGENTS.md'), find: leadLineIn },
+    { file: path.join(cwd, '.naso', 'guides', 'decisions.md'), find: (text) => text.split('\n').find((line) => line.startsWith(DECISIONS_LEAD)) ?? null },
+  ];
+  for (const { file, find } of targets) {
+    const text = await readFile(file, 'utf8').catch(() => null);
+    const line = text === null ? null : find(text);
+    if (line === null) continue;
+    const ours = line.match(LEAD_FORMS)?.[0];
+    if (!ours || ours === next) continue;
+    // Only NASO's own sentence moves: text a person wrote after it on the same line stays.
+    await writeFile(file, text.replace(line, next + line.slice(ours.length)), 'utf8');
+    changed = true;
+  }
+  return changed;
+}
 
 const indexLine = (record) =>
   `- [${record.id} ${record.title}](${path.basename(record.file)})` +
@@ -207,7 +380,11 @@ export async function syncDecisionIndex(cwd) {
         await writeFile(full, `${text}${text.endsWith('\n') ? '' : '\n'}\n${block}\n`, 'utf8');
         return 'appended';
       }
-      const next = text.slice(0, start) + block + text.slice(end + DECISIONS_END.length);
+      // Prettier wants a blank line on each side of the markers; 1.3.x wrote none, and this is
+      // the one place that list is ever rewritten.
+      const before = text.slice(0, start).replace(/\n*$/, start > 0 ? '\n\n' : '');
+      const rest = text.slice(end + DECISIONS_END.length).replace(/^\n*/, '');
+      const next = before + block + (rest ? `\n\n${rest}` : '\n');
       if (next === text) return 'current';
       await writeFile(full, next, 'utf8');
       return 'updated';
@@ -221,16 +398,32 @@ export async function syncDecisionIndex(cwd) {
 // Writing records
 // ---------------------------------------------------------------------------
 
-const slugify = (title) =>
-  title
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 50)
-    .replace(/-+$/, '') || 'decision';
+/**
+ * The file name's words: at most 50 characters, cut at the last hyphen before that, so a
+ * name never ends mid-word ("…-no-ve.md"). A single word longer than 50 is cut where it must.
+ */
+export const slugify = (title) => {
+  const full = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  if (full.length <= 50) return full || 'decision';
+  const cut = full.slice(0, 51).lastIndexOf('-');
+  return (cut > 0 ? full.slice(0, cut) : full.slice(0, 50)).replace(/-+$/, '') || 'decision';
+};
+
+/**
+ * `<placeholder>` outside a code span, put in one. GitLab and GitHub read a bare `<type>` as
+ * an HTML tag and show nothing, so a record saying "`<type>/SCRUM-n`" rendered as "/SCRUM-n".
+ */
+export function codeAngles(text) {
+  return String(text)
+    .split('`')
+    .map((part, i) => (i % 2 === 0 ? part.replace(/<[^<>\n`]+>/g, (tag) => `\`${tag}\``) : part))
+    .join('`');
+}
 
 /** Write a new record. Proposed unless a person passes --accept. */
-export async function createDecision(cwd, { title, decision, why = null, source, by = null, applies = [], supersedes = [], status = 'proposed', date = today() }) {
+export async function createDecision(cwd, { title, decision, why = null, considered = [], source, by = null, applies = [], supersedes = [], status = 'proposed', date = today() }) {
+  [title, decision, why] = [title, decision, why].map((value) => (value === null ? null : codeAngles(value)));
+  considered = considered.map(codeAngles);
   const { dir, records } = await readDecisions(cwd);
   const elsewhere = await numbersOnOtherBranches(cwd, dir);
   const highest = Math.max(0, ...records.map((record) => Number(record.id) || 0), ...elsewhere.keys());
@@ -244,7 +437,9 @@ export async function createDecision(cwd, { title, decision, why = null, source,
     ...(applies.length > 0 ? [`- Applies to: ${applies.join(', ')}`] : []),
     ...(supersedes.length > 0 ? [`- Supersedes: ${supersedes.map(pad).join(', ')}`] : []),
   ];
-  const text = `# ${next}. ${title}\n\n${header.join('\n')}\n\n## Decision\n\n${decision}\n\n## Why\n\n${why ?? 'Not recorded.'}\n`;
+  // The options turned down are what stop the next session proposing them again.
+  const rejected = considered.length > 0 ? `\n## Considered and not chosen\n\n${considered.map((item) => `- ${item}`).join('\n')}\n` : '';
+  const text = `# ${next}. ${title}\n\n${header.join('\n')}\n\n## Decision\n\n${decision}\n\n## Why\n\n${why ?? 'Not recorded.'}\n${rejected}`;
   await mkdir(path.join(cwd, dir), { recursive: true });
   await writeFile(path.join(cwd, file), text, 'utf8');
   const local = new Set(records.map((record) => Number(record.id) || 0));
@@ -393,20 +588,51 @@ async function reportSync(cwd) {
   if (outcome === 'updated') console.log(`Updated ${file}.`);
   if (outcome === 'appended') console.log(`Added the list of decisions at the end of ${file}, between NASO markers.`);
   if (outcome === 'locked') console.log(`${file} is locked by another writer; run ${nasoCommand()} decisions sync after.`);
+  if (outcome !== 'locked' && (await refreshDecisionsLead(cwd))) console.log('Updated the line that says where the list is.');
+}
+
+/**
+ * Warnings for a new record's source: a line another record already cites, and a file named
+ * with no line. Checking titles alone let the same Decided row be proposed twice under two
+ * names; the line is what the two records share.
+ */
+export async function citationOverlaps(cwd, source, records) {
+  const out = [];
+  const named = [...new Set(String(source).match(/(?:[\w.-]+\/)*[\w.-]+\.[A-Za-z]\w*|\b(?:CODEOWNERS|Makefile|Dockerfile)\b/g) ?? [])];
+  for (const file of named) {
+    const text = await readFile(path.join(cwd, file), 'utf8').catch(() => null);
+    if (text === null) continue;
+    const wanted = citedLines(source, file, text);
+    if (wanted.size === 0) {
+      out.push(`--source names ${file} without a line. Cite it as "${file} line <n>", so the next review knows this line is recorded.`);
+      continue;
+    }
+    for (const record of records) {
+      if (!record.source?.includes(file)) continue;
+      const shared = [...citedLines(record.source, file, text)].filter((n) => wanted.has(n)).sort((a, b) => a - b);
+      if (shared.length === 0) continue;
+      out.push(
+        `${file} line ${shared[0]} is already cited by ${record.file} ("${record.title}"). ` +
+          `If it is the same decision, change that record instead, or pass --supersedes ${record.id}.`,
+      );
+    }
+  }
+  return out;
 }
 
 /** `naso-dev decide`: record a decision, proposed unless a person passes --accept. */
 export async function decideMain(argv = process.argv.slice(2)) {
-  const { flags, values, positional } = parseArgs(argv);
+  const { flags, values, lists, positional } = parseArgs(argv, { valued: ['why'] });
   const cwd = path.resolve(positional[0] ?? process.cwd());
   if (flags.has('help')) {
     console.log(`Record a decision so every later session, account and agent starts from it.
 
   ${nasoCommand()} decide --title "<what was decided>" --source "<where>" --decision "<the decision>"
-      [--why "<reason>"] [--by "<who decided>"] [--applies src/api/,docs/api.md]
-      [--supersedes 0003] [--accept]
+      [--why "<reason>"] [--considered "<option> — <why not>"]... [--by "<who decided>"]
+      [--applies src/api/,docs/api.md] [--supersedes 0003] [--accept]
 
 --source is required: the meeting, ticket, email or doc it came from, by reference.
+--considered repeats, one per option the team turned down, so no later session offers it again.
 The record is written as proposed. --accept is for the person who made the decision;
 an agent never passes it.`);
     return;
@@ -424,11 +650,31 @@ an agent never passes it.`);
     process.exitCode = 2;
     return;
   }
+  // A stray word read as the target once created a folder named after a sentence, with a
+  // second decisions tree inside it. The target is a repository that is already there.
+  if (!(await pathExists(cwd))) {
+    console.error(`naso-dev decide: target directory does not exist: ${cwd}. Quote every value, and pass the repository as the only bare argument.`);
+    process.exitCode = 2;
+    return;
+  }
+  const same = (await readDecisions(cwd)).records.find((record) => record.title.trim().toLowerCase() === title.trim().toLowerCase());
+  if (same && !listOf(values.get('supersedes')).map(pad).includes(same.id)) {
+    console.error(
+      `naso-dev decide: ${same.file} already records "${same.title}" (${same.status ?? 'no status'}). ` +
+        `Say it once: change that record, or record the replacement with --supersedes ${same.id}.`,
+    );
+    process.exitCode = 2;
+    return;
+  }
+  const replaced = listOf(values.get('supersedes')).map(pad);
+  const others = (await readDecisions(cwd)).records.filter((record) => !replaced.includes(record.id));
+  for (const line of await citationOverlaps(cwd, source, others)) console.warn(`naso-dev decide: ${line}`);
   const status = flags.has('accept') ? 'accepted' : 'proposed';
   const created = await createDecision(cwd, {
     title,
     decision,
     why: values.get('why') ?? null,
+    considered: lists.get('considered') ?? [],
     source,
     by: values.get('by') ?? null,
     applies: listOf(values.get('applies')),

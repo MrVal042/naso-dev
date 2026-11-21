@@ -14,7 +14,15 @@ import {
   escapeRegExp,
   section,
   nasoCommand,
+  toolVersion,
+  compareVersions,
+  recordedNasoVersion,
+  pinsExactVersions,
+  detectPackageManager,
+  exactDevInstallText,
+  pinAdvice,
 } from './lib.mjs';
+import { DECISIONS_LEAD, decisionsLead, readDecisions } from './decisions.mjs';
 import {
   AGENTS_FILE,
   NASO_END,
@@ -25,6 +33,8 @@ import {
   runtimeEntry,
   topLevelEntries,
 } from './scan.mjs';
+import { deriveTraps, TRAPS_HEADING } from './traps.mjs';
+import { ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
 
 // ---------------------------------------------------------------------------
 // Checking
@@ -86,6 +96,9 @@ export function extractPathTokens(text) {
     if (token.includes('*') || token.includes('<') || token.includes('>')) continue;
     if (token.includes(' ')) continue;
     if (token.startsWith('-')) continue;
+    // `@/`, `~/` and `#/` are import-alias prefixes, not folders: a briefing that explains
+    // where `@/` points was reported as missing the path "@/".
+    if (/^[@~#]\//.test(token)) continue;
     if (TOOL_SCRIPT_NAMES.test(token)) continue;
     if (!PATH_SHAPED_TOKEN.test(token)) continue;
     if (!NAMES_A_PATH.test(token) && !EXTENSIONLESS_FILES.test(token)) continue;
@@ -151,7 +164,161 @@ export async function wrongClaims(cwd, claimed) {
       out.push(`Modules: says ${saysEsm ? 'ES modules' : 'CommonJS'}, but ${modules.why}, so it is ${modules.kind}`);
     }
   }
+  // The line saying where the decisions list is goes stale with the first `decide`; the
+  // commands rewrite it, but a record added by hand or on another branch leaves it behind.
+  const lead = claimed.split('\n').find((line) => line.startsWith(DECISIONS_LEAD)) ?? null;
+  if (lead !== null) {
+    const expected = decisionsLead(await readDecisions(cwd));
+    if (!lead.startsWith(expected)) out.push(`Decisions: the line saying where the list is is out of date. Run: ${nasoCommand()} decisions sync`);
+  }
+  out.push(...(await staleDecisionCounts(cwd, claimed)), ...(await citationsPastTheEnd(cwd, claimed)), ...(await misquotedCitations(cwd, claimed)));
   return out;
+}
+
+/**
+ * A count of decisions written into the Decisions section that the list no longer bears out.
+ * Reviewers write "All 6 there are proposed"; the next `decide` makes it false, and nothing
+ * else would notice.
+ */
+async function staleDecisionCounts(cwd, claimed) {
+  const at = claimed.indexOf('## Decisions');
+  if (at === -1) return [];
+  const section = claimed.slice(at, claimed.indexOf('\n## ', at + 1) === -1 ? undefined : claimed.indexOf('\n## ', at + 1));
+  const { records } = await readDecisions(cwd);
+  const out = [];
+  for (const match of section.matchAll(/\b[Aa]ll (\d+)\b|\b(\d+) (?:decisions|records|decision records)\b/g)) {
+    const said = Number(match[1] ?? match[2]);
+    if (said !== records.length) {
+      out.push(`Decisions: says "${match[0]}", and the list has ${records.length}. Point to the list instead of counting it.`);
+    }
+  }
+  return out;
+}
+
+/**
+ * Line citations past the end of the file they cite: `CONTRIBUTING.md` line 40 in a file
+ * of 20 lines. A citation inside the file may still point at the wrong sentence, but one
+ * past its end is certainly wrong, and it is the first thing a moved or rewritten file breaks.
+ */
+async function citationsPastTheEnd(cwd, claimed) {
+  const out = [];
+  const pattern = /`([^`\s]+)`[^`\n]{0,15}?\blines? (\d+)((?:\s*[–-]\s*\d+)?(?:(?:,\s*|,? and\s+)\d+(?:\s*[–-]\s*\d+)?)*)/g;
+  const lengths = new Map();
+  for (const match of stripFencedBlocks(claimed).matchAll(pattern)) {
+    const file = match[1];
+    const highest = Math.max(...`${match[2]}${match[3]}`.match(/\d+/g).map(Number));
+    if (!lengths.has(file)) {
+      const text = await readFile(path.join(cwd, file), 'utf8').catch(() => null);
+      lengths.set(file, text === null ? null : text.split('\n').length - (text.endsWith('\n') ? 1 : 0));
+    }
+    const length = lengths.get(file);
+    if (length !== null && highest > length) out.push(`\`${file}\` line ${highest}: the file has ${length} lines`);
+  }
+  return [...new Set(out)];
+}
+
+/** Text as a quote compares it: no Markdown emphasis, code or link syntax, one space, straight apostrophes. */
+const quoteText = (text) =>
+  String(text)
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/`|\*\*|__/g, '')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+
+/**
+ * Curly-quoted text next to a line citation that the cited lines do not contain.
+ *
+ * A citation inside the file passes the length check and can still point at the wrong
+ * sentence, and a quote can be misquoted; both read as evidence. Each “…” is paired with the
+ * nearest `file` line(s) N[–M] on the same line of the block and looked for in those lines,
+ * list and quote markers removed and whitespace normalised. An ellipsis in a quote stands for
+ * text left out, so the parts around it are looked for in order.
+ */
+async function misquotedCitations(cwd, claimed) {
+  const out = [];
+  const files = new Map();
+  const citation = /`([^`\s]+)`[^`\n“”]{0,15}?\blines? (\d+)(?:\s*[–-]\s*(\d+))?/g;
+  for (const line of stripFencedBlocks(claimed).split('\n')) {
+    const cites = [...line.matchAll(citation)];
+    if (cites.length === 0) continue;
+    for (const quote of line.matchAll(/“([^”]+)”/g)) {
+      // Nearest by the text between them, not by where each starts: measured from the start,
+      // a citation that closes the previous sentence beat the one right after the quote.
+      // On a tie the citation after the quote wins, as in “…” (`file` line N).
+      const end = quote.index + quote[0].length;
+      const gap = (cite) => (cite.index >= end ? cite.index - end : Math.max(0, quote.index - (cite.index + cite[0].length)) + 0.5);
+      const near = cites.reduce((best, cite) => (gap(cite) < gap(best) ? cite : best));
+      const [, file, first, last = first] = near;
+      if (!files.has(file)) files.set(file, await readFile(path.join(cwd, file), 'utf8').catch(() => null));
+      const text = files.get(file);
+      if (text === null) continue;
+      const [a, b] = [Number(first), Number(last)].sort((x, y) => x - y);
+      const lines = text.split('\n');
+      if (b > lines.length) continue;
+      const cited = quoteText(lines.slice(a - 1, b).map((raw) => raw.replace(/^\s*(?:[-*+>]|\d+[.)]|#{1,6})\s+/, '')).join(' '));
+      const parts = quote[1].split(/…|\.\.\./).map(quoteText).filter(Boolean);
+      let from = 0;
+      const found = parts.every((part) => {
+        const at = cited.indexOf(part.replace(/[.,;:]$/, ''), from);
+        from = at + part.length;
+        return at !== -1;
+      });
+      if (found) continue;
+      const words = quoteText(quote[1].replace(/…|\.\.\./g, ' ')).split(' ');
+      let k = 0;
+      while (k < words.length && cited.includes(words.slice(0, k + 1).join(' '))) k++;
+      const where = a === b ? `line ${a}: the quote is not in that line` : `lines ${a}–${b}: the quote is not in those lines`;
+      const word = quote[1].replace(/…|\.\.\./g, ' ').trim().split(/\s+/)[k] ?? words[k] ?? '';
+      out.push(`\`${file}\` ${where}; first differing word: "${word.replace(/^[“"'(]+|[”"'),.;:!?]+$/g, '')}"`);
+    }
+  }
+  return [...new Set(out)];
+}
+
+/**
+ * Which NASO wrote the block, which one the hook runs, and which one is running now.
+ *
+ * Notes, not problems: a version gap is fixed by `refresh` or an upgrade, not by editing the
+ * block, and a check that failed on it would block every commit after a teammate upgraded.
+ */
+export async function versionNotes(cwd, claimed) {
+  const stamped = claimed.match(/^<!--\s*version:\s*([^\s]+)\s*-->$/m)?.[1] ?? null;
+  const vendored = (await readFile(path.join(cwd, '.naso', 'tooling', 'VERSION'), 'utf8').catch(() => '')).trim() || null;
+  const running = await toolVersion();
+  const notes = [];
+  // package.json and the lockfile are what teammates install; the vendored copy is what the
+  // hook runs. Two versions there and `refresh` from node_modules would move the toolset back.
+  const recorded = await recordedNasoVersion(cwd);
+  const pm = recorded ? (await detectPackageManager(cwd, recorded.pkg)).name : null;
+  const pinGap = pinAdvice({ recorded, vendored, pm });
+  // With a pin that disagrees with the toolset, the pin note says which way to go; a second
+  // note about the running command would point the other way.
+  if (vendored && vendored !== running && !pinGap) {
+    const pinned = recorded ? (recorded.installed ?? recorded.spec.replace(/^[\^~=v]+/, '')) : null;
+    notes.push(
+      `.naso/tooling/ is ${vendored} and this command is ${running}. ` +
+        (pinned === vendored
+          ? `package.json pins ${vendored}: run \`${nasoCommand({ version: vendored })}\` here${compareVersions(running, vendored) > 0 ? `, or move the team to ${running} with \`${nasoCommand({ version: running })} refresh\` and \`${exactDevInstallText(pm, running)}\`` : ''}.`
+          : compareVersions(running, vendored) > 0
+            ? `\`${nasoCommand({ version: running })} refresh\` brings the toolset up to ${running}.`
+            : `Run \`${nasoCommand({ version: vendored })}\` here; a refresh from ${running} would move the toolset back.`),
+    );
+  }
+  if (stamped && vendored && stamped !== vendored) {
+    notes.push(
+      compareVersions(stamped, vendored) < 0
+        ? `The block is stamped ${stamped} and .naso/tooling/ is ${vendored}. \`${nasoCommand()} briefing refresh\` moves the stamp and nothing else.`
+        : `The block is stamped ${stamped}, newer than .naso/tooling/ (${vendored}). \`${nasoCommand({ version: stamped })} refresh\` updates the toolset.`,
+    );
+  }
+  if (pinGap) {
+    notes.push(pinGap);
+  } else if (recorded && vendored && /^[\^~]/.test(recorded.spec) && (await pinsExactVersions(cwd, recorded.pkg))) {
+    notes.push(`package.json records naso-dev as ${recorded.spec}, and this repository pins exact versions. \`${exactDevInstallText(pm, vendored)}\` pins it.`);
+  }
+  return notes;
 }
 
 /** The paths among these that .gitignore covers, whether or not they exist yet. */
@@ -170,6 +337,79 @@ async function ignoredPaths(cwd, paths) {
  * the areas that exist and were never mentioned, which is where the real gaps
  * are.
  */
+/**
+ * Sections NASO added to the block after 1.5, with the version that added each.
+ *
+ * A block people reviewed is never regenerated and refresh never rewrites prose, so without
+ * this a block written before a section existed would keep its old shape for good, and
+ * nobody would know. A missing one is a notice, never a failure: the block is still true,
+ * it is only missing something newer. `review` says what to add and where.
+ */
+export const SECTIONS_SINCE = [
+  {
+    heading: 'Read First',
+    since: '1.6.0',
+    why: 'it tells the agent to read the handoff first and to keep it current',
+    place: 'right after the "What this is" line (after the title if there is none)',
+  },
+  {
+    heading: TRAPS_HEADING,
+    since: '1.6.0',
+    why: 'it states the rules an agent gets wrong, each with its reason and source',
+    place: 'right after the "When This Block Is Wrong" section',
+    // Only where there is something to say: a repository with no decisions, owners,
+    // templates or written rules gets no section, so it is not missing one.
+    applies: async (cwd) => {
+      const files = await listRepoFiles(cwd).catch(() => []);
+      const pkg = await readFile(path.join(cwd, 'package.json'), 'utf8').then(JSON.parse).catch(() => null);
+      return (await deriveTraps(cwd, files ?? [], { pkg })).length > 0;
+    },
+  },
+];
+
+/**
+ * Notices about the block's shape: a block from before 2.0.0 that keeps every section in
+ * AGENTS.md, and a root block grown past its budget. Neither is a failure: the block is still
+ * true, it only costs every session more than it has to.
+ */
+export function layoutNotices(block, guides) {
+  const out = [];
+  const layered = new RegExp(`^##\\s+${escapeRegExp(TOUCH_HEADING)}\\s*$`, 'm').test(block) || guides.length > 0;
+  if (!layered) {
+    const movable = splitSections(block).sections.filter((entry) => TOPICS.some((topic) => topic.sections.includes(entry.heading)));
+    if (movable.length > 0) {
+      out.push({
+        kind: 'single-file',
+        heading: TOUCH_HEADING,
+        since: '2.0.0',
+        text: `Single-file block from before 2.0.0: ${movable.map((entry) => entry.heading).join(', ')} load in every session. \`${nasoCommand()} briefing migrate\` moves them into guides, word for word.`,
+      });
+    }
+    return out;
+  }
+  const lines = block.split('\n').filter((line) => line.trim() !== '' && !/^<!--.*-->$/.test(line.trim())).length;
+  if (lines > ROOT_LINE_BUDGET) {
+    out.push({
+      kind: 'over-budget',
+      heading: TOUCH_HEADING,
+      since: '2.0.0',
+      text: `The block is ${lines} lines of text, past the ${ROOT_LINE_BUDGET} every session can afford. Move detail that only one kind of task needs into the guide that ${TOUCH_HEADING} names for it.`,
+    });
+  }
+  return out;
+}
+
+/** The SECTIONS_SINCE entries a NASO block lacks and this repository would have. Text outside the markers does not count. */
+export async function missingSections(block, cwd) {
+  const missing = [];
+  for (const section of SECTIONS_SINCE) {
+    if (new RegExp(`^##\\s+${escapeRegExp(section.heading)}\\s*$`, 'm').test(block)) continue;
+    if (section.applies && !(await section.applies(cwd))) continue;
+    missing.push(section);
+  }
+  return missing;
+}
+
 export async function checkBriefing(cwd) {
   const agentsPath = path.join(cwd, AGENTS_FILE);
   if (!(await pathExists(agentsPath))) {
@@ -182,7 +422,13 @@ export async function checkBriefing(cwd) {
   // paths failed a fresh setup on every repository whose own AGENTS.md used backticks.
   const start = briefing.indexOf(NASO_START);
   const end = briefing.indexOf(NASO_END);
-  const claimed = start !== -1 && end > start ? briefing.slice(start, end) : briefing;
+  const hasBlock = start !== -1 && end > start;
+  const block = hasBlock ? briefing.slice(start, end) : briefing;
+  // The guides the block links are part of its claim: every path and quote in them is checked
+  // as if it were in the block. A linked guide that is not on disk is MISSING even where .naso/
+  // is git-ignored, because the block sends the agent to it.
+  const guides = hasBlock ? await readLinkedGuides(cwd, block) : [];
+  const claimed = [block, ...guides.filter((guide) => guide.text !== null).map((guide) => guide.text)].join('\n\n');
   const tokens = extractPathTokens(claimed);
   const entries = await listTopLevelEntries(cwd);
 
@@ -193,10 +439,13 @@ export async function checkBriefing(cwd) {
   // A git-ignored path is generated, not invented: `src/gen/` is real once the build runs.
   // Reporting it as missing pushed briefing writers to drop true facts.
   const ignored = await ignoredPaths(cwd, absent);
-  const missing = absent.filter((token) => !ignored.includes(token));
+  const lostGuides = guides.filter((guide) => guide.text === null).map((guide) => guide.rel);
+  const missing = [...new Set([...absent.filter((token) => !ignored.includes(token)), ...lostGuides])];
 
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
+  const notes = await versionNotes(cwd, briefing);
+  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layoutNotices(block, guides)] : [];
 
   const markerCounts = MARKERS.map((marker) => ({
     marker,
@@ -215,6 +464,7 @@ export async function checkBriefing(cwd) {
     ok: problems.length === 0,
     agentsPath,
     briefing,
+    guides,
     tokens,
     entries: entries ?? [],
     ignored,
@@ -222,6 +472,8 @@ export async function checkBriefing(cwd) {
     missing,
     uncovered,
     unfilled,
+    notes,
+    notices,
     problems,
   };
 }
@@ -258,6 +510,21 @@ export function printCheck(result) {
   if (result.unfilled.length > 0) {
     section(`UNFILLED (${result.unfilled.length}) — placeholder markers still present`);
     for (const item of result.unfilled) console.log(`- ${item.marker}: ${item.count}`);
+    console.log('');
+  }
+
+  if (result.notices?.length > 0) {
+    section(`NOTICES (${result.notices.length}) — the block is still true; not a failure`);
+    for (const item of result.notices) {
+      if (item.text) console.log(`- ${item.text}`);
+      else console.log(`- ${item.heading} missing (added in ${item.since}): ${item.why}. \`${nasoCommand()} review\` says what to add, inside the markers.`);
+    }
+    console.log('');
+  }
+
+  if (result.notes?.length > 0) {
+    section(`VERSIONS (${result.notes.length}) — not a problem with the block`);
+    for (const item of result.notes) console.log(`- ${item}`);
     console.log('');
   }
 

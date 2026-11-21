@@ -1,0 +1,10 @@
+{
+  "expo": {
+    "name": "Field Notes",
+    "slug": "field-notes",
+    "scheme": "fieldnotes",
+    "plugins": [
+      "expo-router"
+    ]
+  }
+}

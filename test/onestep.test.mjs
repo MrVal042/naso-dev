@@ -4,25 +4,22 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { devDependencyPlan } from '../tooling/setup.mjs';
 import { toolVersion } from '../tooling/lib.mjs';
-import { BIN, exec, withRepo, put, read, exists, seedProject, driveFlow } from './helpers.mjs';
+import { BIN, exec, withRepo, put, read, exists, seedProject, driveFlow, fakeBin, logCalls } from './helpers.mjs';
 
 /**
  * A fake `npm` that appends its arguments to npm-calls.log and, unless told to lie, moves
  * naso-dev into devDependencies the way the real one does.
  */
 async function fakeNpm(dir, { edits = true } = {}) {
-  const bin = path.join(dir, '.fake-bin');
+  const log = path.join(dir, '.fake-bin', 'npm-calls.log');
   const edit = edits
-    ? `${JSON.stringify(process.execPath)} -e "const f='package.json',fs=require('fs'),p=JSON.parse(fs.readFileSync(f));` +
-      `if(p.dependencies)delete p.dependencies['naso-dev'];p.devDependencies={...p.devDependencies,'naso-dev':'^0'};fs.writeFileSync(f,JSON.stringify(p))"\n`
+    ? "const f='package.json',fs=require('fs'),p=JSON.parse(fs.readFileSync(f));" +
+      "if(p.dependencies)delete p.dependencies['naso-dev'];p.devDependencies={...p.devDependencies,'naso-dev':'^0'};fs.writeFileSync(f,JSON.stringify(p));\n"
     : '';
-  await put(bin, 'npm', `#!/bin/sh\necho "$@" >> "${path.join(dir, '.fake-bin', 'npm-calls.log')}"\n${edit}exit 0\n`);
-  await chmod(path.join(bin, 'npm'), 0o755);
-  return { PATH: `${bin}${path.delimiter}${process.env.PATH}` };
+  return fakeBin(path.join(dir, '.fake-bin'), 'npm', `${logCalls(log)}${edit}`);
 }
 
 test('devDependencyPlan adds, moves, or leaves naso-dev, per package manager', () => {
