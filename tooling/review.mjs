@@ -21,7 +21,9 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs, pathExists, nasoCommand, isMainModule, toolVersion, run, documentedBranchPattern, SUPPORT_EMAIL } from './lib.mjs';
-import { AGENTS_FILE, NASO_START, NASO_END, blockEdited, listRepoFiles } from './scan.mjs';
+import { AGENTS_FILE, NASO_START, NASO_END, blockEdited, listRepoFiles, scanRepo } from './scan.mjs';
+import { renderReadFirst } from './render.mjs';
+import { locateHandoff } from './handoff.mjs';
 import { checkBriefing } from './check.mjs';
 import { NASO_DIR } from './vendor.mjs';
 import { readDecidedNotes } from './toolchain.mjs';
@@ -180,6 +182,28 @@ async function repositoryNames(cwd) {
 }
 
 /** Everything the prompt adapts to, read once. */
+/** How to write each SECTIONS_SINCE section from this repository as it is now. */
+const SECTION_RENDERERS = { 'Read First': renderReadFirst };
+
+/**
+ * The sections the block predates, each with the text NASO would write for it today, so the
+ * agent pastes what the generator would have produced instead of guessing at its shape.
+ * `createFirst` names a file the section cites that does not exist yet.
+ */
+async function missingSectionText(cwd, notices) {
+  if (notices.length === 0) return [];
+  const facts = await scanRepo(cwd);
+  const handoff = await locateHandoff(cwd);
+  const handoffMissing = handoff.where !== 'git' && !(await pathExists(handoff.file));
+  return notices
+    .filter((notice) => SECTION_RENDERERS[notice.heading])
+    .map((notice) => ({
+      ...notice,
+      text: SECTION_RENDERERS[notice.heading]({ ...facts, handoff }),
+      createFirst: notice.heading === 'Read First' && handoffMissing ? { file: handoff.shown, command: `${nasoCommand()} handoff` } : null,
+    }));
+}
+
 export async function reviewState(cwd) {
   const agentsPath = path.join(cwd, AGENTS_FILE);
   const text = (await readFile(agentsPath, 'utf8').catch(() => null)) ?? null;
@@ -189,6 +213,7 @@ export async function reviewState(cwd) {
   const audit = await auditDecisions(cwd).catch(() => ({ findings: [] }));
   const rows = await decidedRows(cwd, files ?? [], decisions.records, { names: await repositoryNames(cwd) });
   const branch = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
+  const check = hasBlock ? await checkBriefing(cwd) : null;
   return {
     branch: branch.ok ? branch.stdout.trim() : null,
     branchPattern: await documentedBranchPattern(cwd),
@@ -200,7 +225,8 @@ export async function reviewState(cwd) {
     // to diff from, and `git log -- AGENTS.md` then names a commit from before NASO.
     committedBlock: (await run('git', ['show', `HEAD:${AGENTS_FILE}`], { cwd })).stdout.includes(NASO_START),
     generatedAt: text?.match(/^<!--\s*generated-at:\s*(\S+)\s*-->$/m)?.[1] ?? null,
-    check: hasBlock ? await checkBriefing(cwd) : null,
+    check,
+    missingSections: check ? await missingSectionText(cwd, check.notices ?? []) : [],
     sources: ruleSources(files ?? []),
     decisions,
     findings: audit.findings ?? [],
@@ -231,6 +257,14 @@ function installedLines(state, index) {
 /** Where things stand, so the agent starts from the current state rather than from zero. */
 function stateLines(state, cmd, here) {
   const lines = [];
+  for (const section of state.missingSections ?? []) {
+    lines.push(
+      `- The block has no ${section.heading} section (added in ${section.since}): ${section.why}. ` +
+        (section.createFirst ? `Run \`${section.createFirst.command}${here}\` first, so \`${section.createFirst.file}\`, which it cites, exists. ` : '') +
+        'Add it inside the markers, right after the "What this is" line (after the title if there is none), as NASO would write it here today:\n\n' +
+        `\`\`\`markdown\n${section.text}\n\`\`\``,
+    );
+  }
   if (state.reviewed && state.tracked && !state.committedBlock) {
     lines.push(
       `- The block was edited after NASO wrote it, but the block is not committed yet: HEAD's ${AGENTS_FILE} has no ${NASO_START} marker, ` +

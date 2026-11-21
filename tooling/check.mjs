@@ -335,6 +335,27 @@ async function ignoredPaths(cwd, paths) {
  * the areas that exist and were never mentioned, which is where the real gaps
  * are.
  */
+/**
+ * Sections NASO added to the block after 1.5, with the version that added each.
+ *
+ * A block people reviewed is never regenerated and refresh never rewrites prose, so without
+ * this a block written before a section existed would keep its old shape for good, and
+ * nobody would know. A missing one is a notice, never a failure: the block is still true,
+ * it is only missing something newer. `review` says what to add and where.
+ */
+export const SECTIONS_SINCE = [
+  {
+    heading: 'Read First',
+    since: '1.6.0',
+    why: 'it tells the agent to read the handoff first and to keep it current',
+  },
+];
+
+/** The SECTIONS_SINCE entries a NASO block lacks. Text outside the markers does not count. */
+export function missingSections(block) {
+  return SECTIONS_SINCE.filter((section) => !new RegExp(`^##\\s+${escapeRegExp(section.heading)}\\s*$`, 'm').test(block));
+}
+
 export async function checkBriefing(cwd) {
   const agentsPath = path.join(cwd, AGENTS_FILE);
   if (!(await pathExists(agentsPath))) {
@@ -363,6 +384,7 @@ export async function checkBriefing(cwd) {
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
+  const notices = start !== -1 && end > start ? missingSections(claimed) : [];
 
   const markerCounts = MARKERS.map((marker) => ({
     marker,
@@ -389,6 +411,7 @@ export async function checkBriefing(cwd) {
     uncovered,
     unfilled,
     notes,
+    notices,
     problems,
   };
 }
@@ -425,6 +448,14 @@ export function printCheck(result) {
   if (result.unfilled.length > 0) {
     section(`UNFILLED (${result.unfilled.length}) — placeholder markers still present`);
     for (const item of result.unfilled) console.log(`- ${item.marker}: ${item.count}`);
+    console.log('');
+  }
+
+  if (result.notices?.length > 0) {
+    section(`NOTICES (${result.notices.length}) — this block predates a section; not a failure`);
+    for (const item of result.notices) {
+      console.log(`- ${item.heading} missing (added in ${item.since}): ${item.why}. \`${nasoCommand()} review\` says what to add, inside the markers.`);
+    }
     console.log('');
   }
 
