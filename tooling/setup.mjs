@@ -96,6 +96,7 @@ import { reviewPrompt } from './review.mjs';
 import { indexFileOf } from './decisions.mjs';
 import { locateHandoff, ensureHandoff, renderHandoff } from './handoff.mjs';
 import { planClaude } from './claude.mjs';
+import { planAgents, detectedHints } from './agents.mjs';
 
 /** Greedy word wrap, for the explanatory paragraphs in the plan. */
 const wrap = (text, width = 74) => {
@@ -380,7 +381,7 @@ const TRACKED_AGENTS_NOTE =
  * The scan is the expensive part and it is what both a rejection and an accept
  * are decided on, so it is done up front and reused for the whole flow.
  */
-export async function inspect(cwd, { track, noHook, exclude, force = false, hookAction = null, saveDev = false, discardEdits = false, noIgnoreFiles = false, claudeDeny = false, claudeHooks = false, claudeSkills = false, owners = [] }) {
+export async function inspect(cwd, { track, noHook, exclude, force = false, hookAction = null, saveDev = false, discardEdits = false, noIgnoreFiles = false, claudeDeny = false, claudeHooks = false, claudeSkills = false, owners = [], agents = [] }) {
   const config = await readConfig(cwd);
 
   // Saved exclusions survive the run, and a --exclude flag adds to them. The union is
@@ -691,7 +692,17 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
     for (const error of claudePlan.errors) plans.push({ target: '.claude/', verb: 'Leave', detail: error });
   }
 
-  return { facts, artifacts, hook, hookDecision, version, plans, writes, excluded, hasAgents, hasBlock, blockEdited: edited, force, localExcludes, claude, claudePlan, devDependency, recordsDev, track, ignoreFiles: [prettierIgnore, dockerIgnore, eslintIgnore].filter((plan) => plan && !plan.manual) };
+  // Pointers for other agents, only those asked for. An agent the repository shows signs of
+  // and nobody asked about gets one line naming the flag, and nothing is written for it.
+  const agentsPlan = agents.length > 0 ? await planAgents(cwd, { track, names: agents }) : null;
+  if (agentsPlan) {
+    plans.push(...agentsPlan.plans);
+    writes.push(...agentsPlan.writes);
+    for (const error of agentsPlan.errors) plans.push({ target: '--agents', verb: 'Leave', detail: error });
+  }
+  for (const entry of await detectedHints(cwd, agents)) plans.push({ target: entry.signs[0], verb: 'Leave', detail: entry.hint });
+
+  return { facts, artifacts, hook, hookDecision, version, plans, writes, excluded, hasAgents, hasBlock, blockEdited: edited, force, localExcludes, claude, claudePlan, agentsPlan, devDependency, recordsDev, track, ignoreFiles: [prettierIgnore, dockerIgnore, eslintIgnore].filter((plan) => plan && !plan.manual) };
 }
 
 /**
@@ -914,6 +925,11 @@ export async function install(cwd, { track, noHook, force, discardEdits = false,
     console.log(no(`CLAUDE.md: ${claudeProtectedAdvice(claude)}`));
   } else {
     console.log(ok('CLAUDE.md: already loads AGENTS.md'));
+  }
+
+  if (state.agentsPlan) {
+    await state.agentsPlan.apply();
+    for (const line of state.agentsPlan.report) console.log(/tracked in git/.test(line) ? no(line) : ok(line));
   }
 
   const vendored = await vendorTooling(cwd);

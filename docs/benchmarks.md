@@ -187,3 +187,28 @@ comments; `briefing` gives a notice past 60 of those, and no sample is near it.
   gson's includes its merge request checklist); one that only reads code never does. The
   decisions guide is 362–369 tokens everywhere, the fixed text the baseline found in every
   sample.
+
+## Phase 5: other agents, and a folder of repositories (2.0.0, unreleased)
+
+Both are opt-in, so a default setup loads exactly what Phase 4 loads (median 849).
+
+**Pointers.** Each agent loads only its own file, so each pointer is paid once, by that
+agent, on top of AGENTS.md:
+
+| Agent | File | Tokens |
+| --- | --- | ---: |
+| Claude Code (unchanged) | `CLAUDE.md`, `@AGENTS.md` | 34 |
+| Gemini CLI | `GEMINI.md`, `@AGENTS.md` | 34 |
+| Copilot | `.github/copilot-instructions.md` | 39 |
+| Windsurf | `.windsurf/rules/naso.md`, always on | 46 |
+| Cursor | `.cursor/rules/naso.mdc`, always applied | 57 |
+| Codex | none: it reads AGENTS.md itself | 0 |
+
+A copy of the briefing in each of those files would cost the whole briefing again in every
+one of them, and go stale the first time the block is corrected.
+
+**Workspace.** A folder holding three repositories (one with CODEOWNERS and a NASO block,
+two without, one of those in a sub-folder) loads 281 tokens from the folder: CLAUDE.md 34, the
+workspace block 235 (19 lines, three repositories), and an empty shared NOW 12. Each row adds
+about 15 tokens. An agent then reads the AGENTS.md of the one repository it works in, which
+is that repository's own load from the tables above.

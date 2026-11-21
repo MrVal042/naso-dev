@@ -28,8 +28,9 @@ export const NASO_DIR = '.naso';
  *
  * They draw the interactive setup — colour, prompts, the flow that asks them — and
  * the pre-commit hook asks nothing, so a copy would be dead weight in every repository.
+ * `workspace` briefs the folder around repositories, never one of them, and asks too.
  */
-const INTERACTIVE_MODULES = ['ui.mjs', 'prompt.mjs', 'flow.mjs'];
+const INTERACTIVE_MODULES = ['ui.mjs', 'prompt.mjs', 'flow.mjs', 'workspace.mjs'];
 
 /** Where the tool scripts land inside a target repository. */
 export function vendoredToolingDir(repoRoot) {

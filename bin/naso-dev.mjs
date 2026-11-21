@@ -18,6 +18,8 @@ const COMMANDS = {
   handoff: { module: 'handoff.mjs', blurb: 'Create, add to, trim or print the handoff between sessions' },
   lesson: { module: 'lessons.mjs', fn: 'lessonMain', blurb: 'Record what a session learned: one file, one index line' },
   lessons: { module: 'lessons.mjs', blurb: 'Print the lessons index, or audit it for stale, duplicate or contradicting lessons' },
+  agents: { module: 'agents.mjs', blurb: 'Point Cursor, Copilot, Gemini or Windsurf at AGENTS.md, one line each' },
+  workspace: { module: 'workspace.mjs', blurb: 'Brief a folder that holds several repositories, without touching them' },
   claude: { module: 'claude.mjs', blurb: 'Claude Code extras, opt-in: deny rules, session hooks, skills' },
   stats: { module: 'stats.mjs', blurb: 'Estimate the tokens an agent loads at session start, and the largest parts' },
   decide: { module: 'decisions.mjs', fn: 'decideMain', blurb: 'Record a decision the team made, with where it was made' },

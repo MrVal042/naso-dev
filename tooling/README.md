@@ -8,7 +8,7 @@ entry point `npx naso-dev <command>`.
 
 ## They are copied into your repository
 
-`npx naso-dev` copies every `.mjs` in this directory except the three interactive ones, this file, and a `VERSION` file
+`npx naso-dev` copies every `.mjs` in this directory except the three interactive ones and `workspace.mjs`, this file, and a `VERSION` file
 into `<repo>/.naso/tooling/`. The pre-commit hook runs that copy, resolved from
 `git rev-parse --show-toplevel`.
 
@@ -56,6 +56,8 @@ every commit with a message nobody can act on.
 | `lessons.mjs`    | The `lesson` and `lessons` commands: one file per lesson, one index line each, and an audit for lessons citing paths that are gone or that duplicate or contradict each other. Where lessons live is decided in `handoff.mjs`, beside the handoff. |
 | `codeowners.mjs` | Which paths are someone else's, from CODEOWNERS (gitignore semantics, last match wins, GitLab sections and default owners) or NASO_SCOPE, as the fewest exact rules: a folder only when nothing under it could ever be yours. A pattern it cannot translate exactly denies nothing and is reported. |
 | `claude.mjs`     | The `claude` command and setup's Claude Code extras: deny rules merged into `.claude/settings.local.json`, SessionStart and Stop hooks, and the four `naso-*` skills, each opt-in, each merged without touching the person's own entries. Also what `doctor` reports about them. |
+| `agents.mjs`     | The `agents` command and setup's `--agents`: one line in Cursor's, Copilot's, Gemini's or Windsurf's own file that sends it to AGENTS.md, never a copy. Appended inside naso markers to a file a person keeps; a tracked file in a local run is left alone with the line to add. Codex reads AGENTS.md itself. |
+| `workspace.mjs`  | The `workspace` command, for a folder that holds repositories and is not one: finds them by their `.git`, runs no git in the folder, writes the folder's AGENTS.md table, CLAUDE.md link, shared handoff and config, and nothing inside a repository. Not vendored. |
 | `session-hook.mjs` | What the Claude Code hooks run: `start` prints the handoff's NOW and the briefing check; `stop` reminds once to update the handoff. No network, an 8-second limit, exit 0 always. |
 | `handoff.mjs`    | The `handoff` command and where the handoff lives: `.naso/HANDOFF.md` when `.naso/` is committed, the git common directory when it is not, so worktrees share one. NOW is one state that `set` replaces; open items carry ids, are carried over by a `set` that leaves them out, and leave only with `done` or `set --close`; only the log below it ages out into a monthly archive. The gate, `stats` and the briefing read its location from here. |
 | `stats.mjs`      | The `stats` command: the estimated tokens of everything an agent loads at session start, each file once, imports followed the way Claude Code follows them, and the largest sections. Reads only. |

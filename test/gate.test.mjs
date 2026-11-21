@@ -89,7 +89,7 @@ test('nothing vendored imports a package, because the hook has no node_modules',
     const names = vendored.map((file) => path.basename(file));
 
     // The interactive setup is not the hook's business.
-    for (const name of ['ui.mjs', 'prompt.mjs', 'flow.mjs']) {
+    for (const name of ['ui.mjs', 'prompt.mjs', 'flow.mjs', 'workspace.mjs']) {
       assert.ok(!names.includes(name), `${name} drives the interactive setup and must not be vendored`);
     }
 

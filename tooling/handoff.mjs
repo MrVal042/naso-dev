@@ -81,6 +81,10 @@ async function gitPath(cwd, flag) {
  */
 export async function repoContext(cwd) {
   const start = path.resolve(cwd);
+  // A workspace folder is not a repository, and may sit inside one (a home folder kept in
+  // git): it is its own root, decided before git is asked anything.
+  const own = await readJSON(path.join(start, '.naso', 'config.json'));
+  if (own?.workspace) return { root: start, config: own, common: null };
   const root = (await gitPath(start, '--show-toplevel')) ?? start;
   const config = await readJSON(path.join(root, '.naso', 'config.json'));
   const common = await gitPath(root, '--git-common-dir');
