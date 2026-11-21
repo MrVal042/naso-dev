@@ -93,6 +93,7 @@ import {
 } from './vendor.mjs';
 import { reviewPrompt } from './review.mjs';
 import { indexFileOf } from './decisions.mjs';
+import { locateHandoff, ensureHandoff, renderHandoff } from './handoff.mjs';
 
 /** Greedy word wrap, for the explanatory paragraphs in the plan. */
 const wrap = (text, width = 74) => {
@@ -397,6 +398,10 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
     exclude: excluded,
     pendingLocalExcludes: pendingExclude?.missing ?? [],
   });
+  // Where the handoff will be once this run writes it: the --track choice decides, and the
+  // config that records it is written after the briefing, so the scan cannot read it yet.
+  facts.handoff = await locateHandoff(cwd, { track });
+  const handoffExists = await pathExists(facts.handoff.file);
   // A CLAUDE.md the repository marks as someone else's is not NASO's to append to, --track
   // or not: the standards it came from would overwrite the line, or a review would refuse it.
   if (claude.action === 'append' || claude.action === 'advise') {
@@ -479,6 +484,19 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
       'briefing. Re-running setup rewrites it; `refresh` never does.',
   });
 
+  if (!handoffExists) {
+    plans.push({
+      target: facts.handoff.shown,
+      verb: 'Write',
+      detail:
+        'The handoff: what one session leaves for the next. The briefing tells the agent to read its NOW ' +
+        'section first and to update it when a PR opens or merges, when a decision is made, and before it stops. ' +
+        (facts.handoff.where === 'git'
+          ? 'It is kept in the git directory, so every worktree of this clone shares it and it is never committed.'
+          : 'It is in .naso/, committed with the rest.'),
+    });
+  }
+
   plans.push(hookPlanEntry(hook, hookDecision));
 
   plans.push(
@@ -550,6 +568,15 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
     change: (await pathExists(path.join(cwd, configRel))) ? 'replace' : 'new',
     lines: lineCount(renderConfig({ version, now, track, hook: hookDecision.action !== 'skip', exclude: excluded })),
   });
+
+  if (!handoffExists) {
+    writes.push({
+      path: facts.handoff.shown,
+      change: 'new',
+      lines: lineCount(renderHandoff({ archiveShown: 'handoff-archive/' })),
+      note: facts.handoff.where === 'git' ? 'the handoff, shared by every worktree' : 'the handoff between sessions',
+    });
+  }
 
   if (pendingExclude?.text) {
     writes.push({ path: shown(cwd, pendingExclude.path), change: 'append', lines: lineCount(pendingExclude.text) });
@@ -819,6 +846,12 @@ export async function install(cwd, { track, noHook, force, discardEdits = false,
   // existed would tell an agent to stage a file git is about to ignore.
   const localExcludes = state.localExcludes ?? (await localExcludePatterns(cwd));
   const excludedLocally = track ? false : await excludeLocally(cwd, localExcludes);
+
+  // Before the briefing: a briefing that names .naso/HANDOFF.md is verified against disk.
+  const handoff = await ensureHandoff(cwd, { track });
+  if (handoff.created) {
+    console.log(ok(`${handoff.located.shown}: wrote the handoff${handoff.located.where === 'git' ? ', in the git directory where every worktree shares it' : ''}`));
+  }
 
   const created = await createBriefing(cwd, { force: state.force ?? force, discardEdits, exclude: state.excluded });
 

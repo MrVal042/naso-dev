@@ -14,6 +14,7 @@ import { readCodeowners, readPrecedence, readSourceMap } from './repo-rules.mjs'
 import { readToolchain } from './toolchain.mjs';
 import { documentedBranchPattern } from './lib.mjs';
 import { readDecisions, DECISIONS_LEAD } from './decisions.mjs';
+import { locateHandoff } from './handoff.mjs';
 import {
   pathExists,
   readJSONFile,
@@ -1988,6 +1989,7 @@ export async function scanRepo(cwd, { exclude = null, pendingLocalExcludes = [] 
     sourceMap: await readSourceMap(cwd, files),
     branchPattern: await documentedBranchPattern(cwd),
     decisions: await readDecisions(cwd),
+    handoff: await locateHandoff(cwd),
     stack: await detectStack(cwd, files, {
       ignore: (await readIgnorePatterns(cwd))?.all ?? [],
       pm: packageManager.name,

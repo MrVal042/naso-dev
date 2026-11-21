@@ -846,6 +846,33 @@ function renderDecisions(facts) {
   ].join('\n');
 }
 
+/**
+ * What to read, in order, before anything else. The handoff first because it is the only
+ * thing here that changed since the last session; then this block; then the decisions,
+ * read for the paths about to change. A handoff kept in the git directory is named by
+ * the command that prints it, not by a path: the path is per machine, and an agent's file
+ * tools are often kept out of .git.
+ */
+function renderReadFirst(facts) {
+  const handoff = facts.handoff;
+  const decisions = facts.decisions ?? {};
+  const handoffLine = handoff && handoff.where !== 'git'
+    ? `1. The handoff's NOW section, in \`${handoff.shown}\`.`
+    : `1. The handoff's NOW section: \`${nasoCommand()} handoff\` prints it (kept in the git directory, shared by every worktree).`;
+  const decisionsLine = decisions.indexExists
+    ? `3. The decisions in \`${decisions.dir}/README.md\` that apply to the paths you will change.`
+    : '3. The decisions that apply to the paths you will change (Decisions, below).';
+  return [
+    '## Read First',
+    '',
+    handoffLine,
+    '2. This briefing.',
+    decisionsLine,
+    '',
+    `Update the handoff with \`${nasoCommand()} handoff add "…"\` when a PR opens or merges, when a decision is made, and before you stop.`,
+  ].join('\n');
+}
+
 /** The closing note, naming the commands this repository declares; null when it names none. */
 function renderWhenDone(facts) {
   const commands = facts.gate?.command
@@ -1094,6 +1121,8 @@ export async function renderBriefing(facts, { version, now }) {
   // What the repository is, before where things are in it: "an Expo mobile app" or "a Go
   // API service" changes how every path below is read, and it is one line.
   if (facts.stack?.summary) parts.push(`**What this is.** ${facts.stack.summary}`);
+
+  parts.push(renderReadFirst(facts));
 
   // Said first, because every later section is read in its light. The default is NASO's
   // own position — it derived this block, people wrote the rest — and the quoted lines are

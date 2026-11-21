@@ -30,6 +30,7 @@
 // Zero external dependencies — Node.js core modules only.
 
 import { readFile, writeFile } from 'node:fs/promises';
+import { locateHandoff, nowLineCount, NOW_CAP } from './handoff.mjs';
 import path from 'node:path';
 import {
   pathExists,
@@ -633,6 +634,21 @@ async function checkDecisionRecords(cwd, stagedFiles, { append }) {
   console.log(`  Refreshed ${index} and staged it with this commit.`);
 }
 
+/**
+ * A handoff whose NOW has outgrown its cap. A warning and never a refusal: the handoff is
+ * notes, and a commit is not the moment to make somebody tidy them. It names the command
+ * that fixes it. No handoff, no row: most commits have nothing to say about it.
+ */
+async function checkHandoff(cwd) {
+  const located = await locateHandoff(cwd).catch(() => null);
+  const text = located ? await readFile(located.file, 'utf8').catch(() => null) : null;
+  if (text === null) return;
+  const lines = nowLineCount(text);
+  if (lines > NOW_CAP) {
+    record('Handoff', 'warn', `NOW is ${lines} lines, over its cap of ${NOW_CAP}; run: ${nasoCommand()} handoff trim`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Modes
 // ---------------------------------------------------------------------------
@@ -738,6 +754,7 @@ async function runStaged(cwd, pkg, pm, { append, prefixes, strictScope }) {
     record('AGENTS.md update', 'skip', '--no-append');
   }
   await checkDecisionRecords(cwd, stagedFiles, { append });
+  await checkHandoff(cwd);
 
   printSummary();
 }

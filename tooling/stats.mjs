@@ -12,13 +12,11 @@
 import path from 'node:path';
 import { readFile, realpath } from 'node:fs/promises';
 import { parseArgs, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, toolVersion } from './lib.mjs';
+import { locateHandoff, NOW_START, NOW_END } from './handoff.mjs';
+
+export { NOW_START, NOW_END };
 
 export const CHARS_PER_TOKEN = 4;
-
-/** The handoff's NOW part, the only part of it an agent reads at session start. */
-export const HANDOFF_DEFAULT = '.naso/HANDOFF.md';
-export const NOW_START = '<!-- naso:now:start -->';
-export const NOW_END = '<!-- naso:now:end -->';
 
 const NASO_START = '<!-- naso:start -->';
 const NASO_END = '<!-- naso:end -->';
@@ -144,17 +142,6 @@ function isInside(root, candidate) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
 }
 
-async function handoffPath(root) {
-  const config = await readText(path.join(root, '.naso', 'config.json'));
-  try {
-    const configured = config && JSON.parse(config)?.handoff?.path;
-    if (typeof configured === 'string' && configured.trim()) return configured.trim();
-  } catch {
-    // A config that does not parse is doctor's to report. The default still applies.
-  }
-  return HANDOFF_DEFAULT;
-}
-
 /**
  * Everything an agent loads at session start, measured.
  *
@@ -244,19 +231,21 @@ export async function measureSessionLoad(targetDir) {
     }
   }
 
-  const handoffRel = await handoffPath(root);
-  const handoffFull = path.resolve(root, handoffRel);
-  const handoffReal = await realOrNull(handoffFull);
-  if (handoffReal && isInside(realRoot, handoffReal) && !seen.has(handoffReal)) {
-    const text = await readText(handoffFull);
+  // The handoff may live in the git directory, outside the working tree, when .naso/ is
+  // kept local. That is still this repository's, so it counts; any other outside path does not.
+  const handoff = await locateHandoff(root);
+  const handoffReal = await realOrNull(handoff.file);
+  if (handoffReal && (handoff.where === 'git' || isInside(realRoot, handoffReal)) && !seen.has(handoffReal)) {
+    const text = await readText(handoff.file);
     if (text !== null) {
       seen.add(handoffReal);
       const start = text.indexOf(NOW_START);
       const end = text.indexOf(NOW_END, start + 1);
+      const shown = handoff.shown;
       if (start !== -1 && end !== -1) {
-        record(handoffRel, text.slice(start + NOW_START.length, end), { reason: 'the handoff NOW section', part: 'NOW' });
+        record(shown, text.slice(start + NOW_START.length, end), { reason: 'the handoff NOW section', part: 'NOW' });
       } else {
-        record(handoffRel, text, { reason: 'the handoff, with no NOW markers, so all of it', part: 'whole' });
+        record(shown, text, { reason: 'the handoff, with no NOW markers, so all of it', part: 'whole' });
       }
     }
   }

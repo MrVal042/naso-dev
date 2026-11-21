@@ -77,3 +77,24 @@ npx naso-dev stats . --json
 
 Each later phase adds its own row set below, with the same repositories at the same
 commits, and the change against this baseline.
+
+## Phase 1: handoff and Read First (1.6.0, unreleased)
+
+Setup now writes a handoff and puts a Read First section at the top of the block. Same
+repositories, same commits, `--force` to regenerate. Setup kept every handoff local, so it is
+`.git/naso/HANDOFF.md`, and its NOW section is empty until somebody adds to it.
+
+| Repository | Baseline | Phase 1 | Change | Read First | Handoff NOW, empty |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| changesets/changesets | 1,911 | 2,004 | +93 | 92 | 1 |
+| psf/requests | 1,490 | 1,581 | +91 | 90 | 1 |
+| spf13/cobra | 1,506 | 1,596 | +90 | 90 | 1 |
+| BurntSushi/ripgrep | 1,701 | 1,791 | +90 | 90 | 1 |
+| google/gson | 1,696 | 1,787 | +91 | 90 | 1 |
+| terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,404 | +90 | 90 | 1 |
+| naso-dev | 1,670 | 1,760 | +90 | 90 | 1 |
+| field repository, as generated | 1,576 | 1,669 | +93 | 92 | 1 |
+
+Median 1,670 → 1,760 (+5.4%). A NOW section at its 60-line cap adds about 600–900 tokens,
+depending on line length, and the cap is what keeps it there: unbounded, the field handoff
+this replaces passed 1,500 lines. Phase 4 has to win the Read First cost back.
