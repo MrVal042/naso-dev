@@ -49,7 +49,6 @@ import {
   compareVersions,
   toolVersion,
   coversUnit,
-  isRootNoise,
   isNoisyDir,
   isMainModule,
   SUPPORT_EMAIL,

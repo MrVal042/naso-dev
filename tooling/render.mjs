@@ -1061,11 +1061,6 @@ function renderCiGate(facts, rewriters) {
   return lines.join('\n\n');
 }
 
-/** The root block only. `renderLayers` gives the guides it links as well. */
-export async function renderBriefing(facts, options) {
-  return (await renderLayers(facts, options)).block;
-}
-
 /**
  * The block and its guides, from one scan.
  *

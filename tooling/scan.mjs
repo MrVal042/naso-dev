@@ -356,20 +356,6 @@ export function dominantLanguage(files) {
   return { label, count, share: Math.round((count / total) * 100), total };
 }
 
-/** Language counts across every file, including data and docs. */
-export function languageMix(files) {
-  const counts = new Map();
-  for (const file of files) {
-    const ext = path.extname(file).slice(1).toLowerCase();
-    if (!ext) continue;
-    const label = LANGUAGE_BY_EXT.get(ext) ?? ext;
-    counts.set(label, (counts.get(label) ?? 0) + 1);
-  }
-  return Array.from(counts.entries())
-    .map(([label, count]) => ({ label, count }))
-    .sort((a, b) => b.count - a.count);
-}
-
 /**
  * Name -> responsibility, for names that mean the same thing in most repos.
  *
@@ -2123,26 +2109,4 @@ export function parseIgnorePatterns(text) {
 export async function readIgnorePatterns(cwd) {
   const raw = await readFile(path.join(cwd, '.gitignore'), 'utf8').catch(() => null);
   return raw === null ? null : parseIgnorePatterns(raw);
-}
-
-/**
- * `.git/info/exclude`, which is the one ignore file that never leaves the machine.
- *
- * Worth naming separately from .gitignore because the two are believed in opposite
- * directions: a teammate cloning the repository gets your .gitignore and none of your
- * local excludes, so a path that "is excluded" for you is tracked for them.
- */
-export async function readLocalExcludes(cwd) {
-  const gitDir = await run('git', ['rev-parse', '--git-dir'], { cwd });
-  if (!gitDir.ok) return [];
-
-  const dir = gitDir.stdout.trim();
-  const absolute = path.isAbsolute(dir) ? dir : path.resolve(cwd, dir);
-  const raw = await readFile(path.join(absolute, 'info', 'exclude'), 'utf8').catch(() => null);
-  if (raw === null) return [];
-
-  return raw
-    .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line && !line.startsWith('#'));
 }

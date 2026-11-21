@@ -470,12 +470,8 @@ Options:
 With no terminal and no --yes, this prints the plan, writes nothing, and exits 2.
 --dry-run prints the same plan and exits 0.
 
-Other commands:
-  briefing   regenerate or re-verify the ${AGENTS_FILE} briefing
-  refresh    re-vendor the toolset and move the version stamp
-  guide      guide for one area, or --tour for a read-through
-  validate   the pre-commit gate, run by hand
-  doctor     diagnose the environment and the install`);
+Other commands (briefing, review, handoff, stats, agents, workspace and the
+rest): ${nasoCommand()} --help`);
     return;
   }
 

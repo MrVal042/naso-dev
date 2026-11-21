@@ -1,5 +1,16 @@
 # Changelog
 
+## 2.0.1
+
+### Fixed
+
+- **A Copilot pointer no longer makes `.github/` an area.** `naso-dev agents copilot` in a repository with no `.github/` writes `.github/copilot-instructions.md`; once committed, `briefing` reported `.github/` as UNCOVERED, while the pre-commit gate said there was no new area. Copilot's instruction files (`.github/copilot-instructions.md`, `.github/instructions/`) are a briefing, like AGENTS.md, and never count toward an area. A `.github/` that holds anything else is still one.
+
+### Changed
+
+- **Dead code removed:** twelve functions nothing called (an older pair of prompt helpers, git status parsing, a local-excludes reader and remover, a root-noise filter, and others) and the imports only they used, about 220 lines in all. No behavior changes.
+- **Docs in step with 2.0:** `docs/reference.md` lists every command and shows the 30-file toolset; the setup flow's `--help` points to `naso-dev --help` for the other commands instead of listing five of them; the benchmark phases are no longer marked unreleased; CONTRIBUTING sends output changes to `docs/reference.md`. The examples and the demo are regenerated with 2.0.1.
+
 ## 2.0.0
 
 ### Breaking

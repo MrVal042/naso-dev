@@ -3,7 +3,7 @@
 Everything NASO does, in detail. The [README](../README.md) is the short version.
 
 
-NASO (Never Assume, Scan Once) generates a truthful `AGENTS.md` from your repository and keeps it consistent with what actually exists. One command sets it up: it reads the repository, shows you the plan, asks, and then writes. It copies a small toolset in, installs a minimal pre-commit gate, and gives you `briefing`, `review`, `refresh`, `guide`, `validate` and `doctor`, plus `decide` and `decisions` to record what your team decided so every later session starts from it. It has no dependencies, so installing it adds naso-dev and nothing else.
+NASO (Never Assume, Scan Once) generates a truthful `AGENTS.md` from your repository and keeps it consistent with what actually exists. One command sets it up: it reads the repository, shows you the plan, asks, and then writes. It copies a small toolset in, installs a minimal pre-commit gate, and gives you `briefing`, `review`, `refresh`, `guide`, `validate`, `doctor` and `stats`; `decide`, `decisions`, `handoff`, `lesson` and `lessons` to carry what your team decided and learned from one session to the next; and the opt-in `claude`, `agents` and `workspace`. It has no dependencies, so installing it adds naso-dev and nothing else.
 
 The npm package is `naso-dev`, so every command below is `npx naso-dev <command>`.
 
@@ -56,10 +56,10 @@ A first run in a NestJS API with a `package.json`, shortened. Your branch, count
 ```text
 $ npx naso-dev@latest --save-dev
 Need to install the following packages:
-naso-dev@2.0.0
+naso-dev@2.0.1
 Ok to proceed? (y) y
 
-NASO 2.0.0  /path/to/acme-api
+NASO 2.0.1  /path/to/acme-api
 
 ## This repository
 
@@ -108,7 +108,7 @@ The plan for acme-api  nothing is written until you accept
   .naso/guides/workflow.md     new, 31 lines  (read when the block says so, not at session start)
   .naso/guides/decisions.md    new, 15 lines  (read when the block says so, not at session start)
   CLAUDE.md                new, 1 line      (makes Claude Code load the briefing)
-  .naso/tooling/           new, 11865 lines (21 files; the hook runs this copy)
+  .naso/tooling/           new, 15134 lines (30 files; the hook runs this copy)
   .naso/config.json        new, 8 lines     (the choices you made here)
   .git/hooks/pre-commit    new, 47 lines    (the gate, on this machine)
   .prettierignore          append 1 line
@@ -116,7 +116,7 @@ The plan for acme-api  nothing is written until you accept
   package.json             changed  (devDependencies, by npm, last)
   package-lock.json        changed  (by npm, with node_modules/)
 
-  Last, `npm install --save-dev naso-dev@2.0.0`, the only step that uses the network.
+  Last, `npm install --save-dev naso-dev@2.0.1`, the only step that uses the network.
 
 ◆  Write these files and install the hook?
    ● Accept (write exactly the files listed above)
@@ -132,13 +132,13 @@ The plan for acme-api  nothing is written until you accept
 
 ✓ AGENTS.md: wrote the NASO block, 152 lines
 ✓ CLAUDE.md: wrote `@AGENTS.md`, so Claude Code loads the briefing
-✓ .naso/tooling/: copied 21 files; the hook runs this copy, not the package
+✓ .naso/tooling/: copied 30 files; the hook runs this copy, not the package
 ✓ .naso/config.json: wrote the settings this run used
 ✓ .prettierignore: added .naso/, so prettier --check leaves the toolset alone
 ✓ eslint.config.mjs: added .naso/ to its ignores, so ESLint leaves the toolset alone
 ✓ pre-commit hook: installed (.git/hooks/pre-commit)
 ✓ git: .naso/ and AGENTS.md are yours to commit (--track)
-✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.0`
+✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.1`
 
 ## Verify
 

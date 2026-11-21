@@ -4,7 +4,6 @@
 import { access, readFile, readdir, constants } from 'node:fs/promises';
 import { realpathSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import { createInterface } from 'node:readline/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -26,14 +25,6 @@ export async function readJSONFile(filePath) {
   } catch {
     return null;
   }
-}
-
-/** Return the first candidate filename that exists directly under cwd. */
-export async function firstExisting(cwd, candidates) {
-  for (const name of candidates) {
-    if (await pathExists(path.join(cwd, name))) return name;
-  }
-  return null;
 }
 
 /** Return every candidate filename that exists directly under cwd. */
@@ -455,44 +446,6 @@ export async function hasLocalBin(cwd, bin) {
   return pathExists(path.join(cwd, 'node_modules', '.bin', binName));
 }
 
-/** Collect git branch, working-tree status, and ahead/behind vs upstream. Null if not a repo. */
-export async function getGitInfo(cwd) {
-  const isRepo = await run('git', ['rev-parse', '--is-inside-work-tree'], { cwd });
-  if (!isRepo.ok) return null;
-
-  const branchRes = await run('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd });
-  const branch = branchRes.ok ? branchRes.stdout.trim() : 'unknown';
-
-  const statusRes = await run('git', ['status', '--porcelain'], { cwd });
-  const changes = statusRes.ok ? statusRes.stdout.split('\n').filter(Boolean) : [];
-
-  const upstreamRes = await run(
-    'git',
-    ['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
-    { cwd },
-  );
-
-  let upstream = null;
-  let ahead = 0;
-  let behind = 0;
-
-  if (upstreamRes.ok) {
-    upstream = upstreamRes.stdout.trim();
-    const countRes = await run(
-      'git',
-      ['rev-list', '--left-right', '--count', `${upstream}...HEAD`],
-      { cwd },
-    );
-    if (countRes.ok) {
-      const [b, a] = countRes.stdout.trim().split(/\s+/).map(Number);
-      behind = b || 0;
-      ahead = a || 0;
-    }
-  }
-
-  return { branch, changes, upstream, ahead, behind };
-}
-
 /** Split NUL-delimited git output into fields, dropping the empty tail. */
 export function splitNul(stdout) {
   return String(stdout).split('\0').filter((field) => field.length > 0);
@@ -532,22 +485,6 @@ export function parseGitStatusPorcelainZ(raw) {
   }
 
   return entries;
-}
-
-/** Parse `git status --porcelain`, newline form. Kept for the doctor and for tests. */
-export function parseGitStatusPorcelain(raw) {
-  return raw
-    .split('\n')
-    .map((line) => line.replace(/\r$/, ''))
-    .filter(Boolean)
-    .map((line) => {
-      const status = line.slice(0, 2).trim() || '??';
-      const rawPath = line.slice(3).trim();
-      const filePath = rawPath.includes(' -> ')
-        ? (rawPath.split(' -> ').at(-1)?.trim() ?? rawPath)
-        : rawPath;
-      return { status, path: filePath, from: null };
-    });
 }
 
 /** Paths currently staged for commit (added/copied/modified/renamed — not deleted). */
@@ -677,37 +614,9 @@ export function listOption(lists, key) {
 // Briefing coverage
 // ---------------------------------------------------------------------------
 
-// Root-level entries that never say anything about a codebase's shape.
-const ROOT_NOISE = new Set([
-  '.editorconfig',
-  '.gitattributes',
-  '.gitignore',
-  '.gitkeep',
-  '.npmrc',
-  '.nvmrc',
-  'license',
-  'licence',
-  'notice',
-  'readme',
-]);
-
 // Directories whose presence is not news about the repo's structure.
 const NOISY_DIR_PATTERN =
   /^(node_modules|dist|build|out|coverage|vendor|__pycache__|target|\.venv|venv|\.next|\.nuxt|\.output|\.turbo|\.svelte-kit|\.gradle|\.idea|\.vscode|\.cache|tmp|temp|logs?)$/i;
-
-/**
- * Is this root-level filename noise rather than structure?
- *
- * The extension is ignored, because `README.md`, `LICENSE` and `NOTICE.txt` are
- * the same three files wearing different hats — and a briefing that lists
- * `README.md` as an "area" has told the reader nothing.
- */
-export function isRootNoise(name) {
-  const base = name.toLowerCase();
-  if (ROOT_NOISE.has(base)) return true;
-  const ext = path.extname(base);
-  return Boolean(ext) && ROOT_NOISE.has(base.slice(0, -ext.length));
-}
 
 /** Is this directory name build output or tooling rather than project structure? */
 export function isNoisyDir(name) {
@@ -1137,54 +1046,6 @@ export function status(kind, message) {
 // ---------------------------------------------------------------------------
 // Prompts
 // ---------------------------------------------------------------------------
-
-/** Ask a yes/no question. Returns the default when the answer is just Enter. */
-export async function promptYesNo(question, { defaultYes = false } = {}) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    const hint = defaultYes ? 'Y/n' : 'y/N';
-    const answer = (await rl.question(`${question} [${hint}] `)).trim().toLowerCase();
-    if (answer === '') return defaultYes;
-    return answer === 'y' || answer === 'yes';
-  } finally {
-    rl.close();
-  }
-}
-
-/**
- * Ask the user to pick one of a numbered list. Returns the chosen index.
- *
- * Accepts the number, or the first few letters of a label, because typing
- * "2" is faster than typing a whole label and typing a label is faster than
- * counting down a list of eight.
- */
-export async function promptChoice(question, choices) {
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    console.log(question);
-    choices.forEach((choice, index) => {
-      console.log(`  ${index + 1}) ${choice.label}`);
-    });
-    for (;;) {
-      const answer = (await rl.question(`Choose 1-${choices.length} [1]: `)).trim();
-      if (answer === '') return 0;
-
-      const asNumber = Number.parseInt(answer, 10);
-      if (String(asNumber) === answer && asNumber >= 1 && asNumber <= choices.length) {
-        return asNumber - 1;
-      }
-
-      const byLabel = choices.findIndex((choice) =>
-        choice.label.toLowerCase().startsWith(answer.toLowerCase()),
-      );
-      if (byLabel !== -1) return byLabel;
-
-      console.log(`  "${answer}" is not one of the options.`);
-    }
-  } finally {
-    rl.close();
-  }
-}
 
 /**
  * A support request pre-filled with everything a maintainer would ask for.

@@ -78,7 +78,7 @@ npx naso-dev stats . --json
 Each later phase adds its own row set below, with the same repositories at the same
 commits, and the change against this baseline.
 
-## Phase 1: handoff and Read First (1.6.0, unreleased)
+## Phase 1: handoff and Read First (1.6.0)
 
 Setup now writes a handoff and puts a Read First section at the top of the block. Same
 repositories, same commits, `--force` to regenerate. Setup kept every handoff local, so it is
@@ -105,7 +105,7 @@ sessions update it; only the log grows, and the log is not loaded. At its 60-lin
 would be about 600–900 tokens, and the gate warns before that. Phase 4 has to win the Read
 First cost back.
 
-## Phase 2: rules that are easy to get wrong, and lessons (1.6.0, unreleased)
+## Phase 2: rules that are easy to get wrong, and lessons (1.6.0)
 
 Read First gains one line about lessons (+30 tokens). The rules section appears only where
 the repository has a source for it. The branch pattern, CONTRIBUTING's merge rules and the
@@ -132,7 +132,7 @@ is the section's ceiling in practice.
 Every row has an empty NOW. (The cobra clone still held the 65-token sample NOW from
 Phase 1; it is left out here so the rows compare like for like.)
 
-## Phase 3: Claude Code extras (1.6.0, unreleased)
+## Phase 3: Claude Code extras (1.6.0)
 
 Every extra is opt-in, so a default setup loads exactly what Phase 2 loads: naso-dev stays at
 1,812. With them turned on (naso-dev, same commit):
@@ -147,7 +147,7 @@ Every extra is opt-in, so a default setup loads exactly what Phase 2 loads: naso
 `stats` now counts each skill's front matter. The hook output is not a file, so it is
 estimated from its length (102 characters with an empty NOW).
 
-## Phase 4: the layered block (2.0.0, unreleased)
+## Phase 4: the layered block (2.0.0)
 
 The block keeps what every session needs and routes the rest, through a When You Touch
 table, to guides in `.naso/guides/` that load only when a task needs one. Area lines lost
@@ -188,7 +188,7 @@ comments; `briefing` gives a notice past 60 of those, and no sample is near it.
   decisions guide is 362–369 tokens everywhere, the fixed text the baseline found in every
   sample.
 
-## Phase 5: other agents, and a folder of repositories (2.0.0, unreleased)
+## Phase 5: other agents, and a folder of repositories (2.0.0)
 
 Both are opt-in, so a default setup loads exactly what Phase 4 loads (median 849).
 

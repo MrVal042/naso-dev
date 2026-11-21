@@ -15,10 +15,9 @@ import {
   run,
   shellSingleQuote,
   toPosixPath,
-  nasoDir,
   nasoCommand,
 } from './lib.mjs';
-import { NASO_DIR, vendoredToolingDir, vendoredScriptPath } from './vendor.mjs';
+import { NASO_DIR } from './vendor.mjs';
 
 const HOOK_MARKER = '# managed-by: naso-dev';
 
@@ -50,15 +49,6 @@ export const OWNED_FILES = ['AGENTS.md', 'SETUP_INSTRUCTIONS.md'];
  * from `setup` in three seconds.
  */
 export const LOCAL_EXCLUDE_PATTERNS = [NASO_DIR, 'AGENTS.md'];
-
-/** The tool scripts the hook calls, by their file name. */
-export function toolPaths() {
-  const dir = path.join(nasoDir(), 'tooling');
-  return {
-    validate: path.join(dir, 'validate.mjs'),
-    briefing: path.join(dir, 'briefing.mjs'),
-  };
-}
 
 /** What a human should type to run the gate by hand, without a hook. */
 export const HOOK_MANUAL_LINE = `node ${NASO_DIR}/tooling/validate.mjs --staged`;
@@ -399,25 +389,6 @@ export async function pendingLocalExclusion(targetDir, patterns = null) {
   return { path: excludePath, missing, text };
 }
 
-/** Remove NASO's block from .git/info/exclude. Undoes excludeLocally. */
-export async function removeLocalExclusions(targetDir, patterns = LOCAL_EXCLUDE_PATTERNS) {
-  const gitDirRes = await run('git', ['rev-parse', '--git-dir'], { cwd: targetDir });
-  if (!gitDirRes.ok) return false;
-
-  const gitDirRaw = gitDirRes.stdout.trim();
-  const gitDir = path.isAbsolute(gitDirRaw) ? gitDirRaw : path.resolve(targetDir, gitDirRaw);
-  const excludePath = path.join(gitDir, 'info', 'exclude');
-  const existing = await readFile(excludePath, 'utf8').catch(() => null);
-  if (existing === null) return false;
-
-  const lines = existing.split('\n');
-  const kept = lines.filter(
-    (line) => line.trim() !== EXCLUDE_MARKER && !patterns.includes(line.trim()),
-  );
-  await writeFile(excludePath, kept.join('\n').replace(/\n{3,}/g, '\n\n'), 'utf8');
-  return true;
-}
-
 /** Is the file ignored by git? Respects .gitignore, excludes and global config. */
 export async function isIgnored(targetDir, file) {
   const res = await run('git', ['check-ignore', '-q', file], { cwd: targetDir });
@@ -505,9 +476,4 @@ export async function removeArtifacts(artifacts, { onlyOwned = true } = {}) {
   }
 
   return { removed, kept, failed };
-}
-
-/** Absolute path to a tool script, for display and for hook bodies. */
-export function toolScriptPath(name) {
-  return path.join(nasoDir(), 'tooling', name);
 }
