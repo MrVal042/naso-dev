@@ -17,10 +17,10 @@ test('agents all writes one pointer per agent, each naming AGENTS.md and holding
     for (const file of POINTER_FILES) {
       const text = await read(dir, file);
       assert.match(text, /AGENTS\.md/, file);
-      assert.ok(text.split('\n').length <= 9, `${file} is a pointer, not a copy`);
+      assert.ok(text.split('\n').length <= 11, `${file} is a pointer, not a copy`);
     }
     // Cursor and Windsurf read front matter only when it is the first thing in the file.
-    assert.match(await read(dir, '.cursor/rules/naso.mdc'), /^---\n[^]*alwaysApply: true\n---\n<!-- naso:start -->/);
+    assert.match(await read(dir, '.cursor/rules/naso.mdc'), /^---\n[^]*alwaysApply: true\n---\n\n<!-- naso:start -->/);
     assert.match(await read(dir, '.windsurf/rules/naso.md'), /^---\ntrigger: always_on\n---\n/);
     // Gemini CLI follows @imports, as Claude Code does.
     assert.match(await read(dir, 'GEMINI.md'), /^@AGENTS\.md$/m);

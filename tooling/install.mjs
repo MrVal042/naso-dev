@@ -303,9 +303,9 @@ export async function localExcludePatterns(targetDir) {
 export const CLAUDE_FILE = 'CLAUDE.md';
 
 export const CLAUDE_LINK_BLOCK =
-  '<!-- naso:start -->\n' +
+  '<!-- naso:start -->\n\n' +
   'Claude Code reads this file, not AGENTS.md. The line below loads the NASO briefing.\n\n' +
-  '@AGENTS.md\n' +
+  '@AGENTS.md\n\n' +
   '<!-- naso:end -->\n';
 
 /** Does this CLAUDE.md already bring AGENTS.md in? Any mention counts: it was put there on purpose. */
@@ -374,7 +374,9 @@ export async function excludeLocally(targetDir, patterns = null) {
  * `text` the exact bytes that would be appended, so a plan can show the change first.
  */
 export async function pendingLocalExclusion(targetDir, patterns = null) {
-  const gitDirRes = await run('git', ['rev-parse', '--git-dir'], { cwd: targetDir });
+  // The common dir: in a linked worktree, --git-dir is .git/worktrees/<name>, whose
+  // info/exclude git never reads, so files "kept out of git" there showed as untracked.
+  const gitDirRes = await run('git', ['rev-parse', '--git-common-dir'], { cwd: targetDir });
   if (!gitDirRes.ok) return null;
   patterns ??= await localExcludePatterns(targetDir);
 

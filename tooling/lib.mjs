@@ -207,12 +207,40 @@ function fieldManager(field, exists) {
 
 const CONTRIBUTING_FILES = ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'docs/CONTRIBUTING.md'];
 
+const TICKET_PLACEHOLDER = /key|ticket|issue|jira/i;
+const NUMBER_PLACEHOLDER = /^(?:n|num|number|id|\d+)$/i;
+
+/**
+ * A branch template as a regex. Most placeholders match one or more characters other than a
+ * slash. A ticket placeholder (`<KEY>`, `<JIRA-KEY>`, `<ticket>`) matches an uppercase key,
+ * `SCRUM` before a number placeholder and `SCRUM-142` otherwise. A number placeholder (`<n>`)
+ * matches digits. With every placeholder free, `<type>/<JIRA-KEY>-<short-name>` passed
+ * `local/preview-1121-0104`, which has no key in it.
+ */
+export function branchTemplateRegex(template) {
+  const parts = template.split(/(<[^>]+>)/).filter((part) => part !== '');
+  const name = (part) => /^<([^>]+)>$/.exec(part)?.[1] ?? null;
+  const pattern = parts
+    .map((part, i) => {
+      const placeholder = name(part);
+      if (placeholder === null) return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (NUMBER_PLACEHOLDER.test(placeholder)) return '\\d+';
+      if (TICKET_PLACEHOLDER.test(placeholder)) {
+        const numberFollows = parts[i + 1] === '-' && NUMBER_PLACEHOLDER.test(name(parts[i + 2] ?? '') ?? '');
+        return numberFollows ? '[A-Z][A-Z0-9]*' : '[A-Z][A-Z0-9]*-\\d+';
+      }
+      return '[^/\\s]+';
+    })
+    .join('');
+  return new RegExp(`^${pattern}$`);
+}
+
 /**
  * The branch pattern a contributing guide states, as `{ source, text, regex }`, or null.
  *
  * Read from a backticked template with placeholders on a line about branches:
- * `<type>/<KEY>-<n>-<slug>`. Each `<placeholder>` matches one or more characters other than
- * a slash; everything else is literal. A guide with examples only and no template gives
+ * `<type>/<KEY>-<n>-<slug>`. Placeholders match as `branchTemplateRegex` says; everything
+ * else is literal. A guide with examples only and no template gives
  * nothing, because an example does not say which of its parts are fixed. The gate used to
  * accept any `x/y`, which passed every branch a team's own rule would have rejected.
  */
@@ -227,11 +255,7 @@ export async function documentedBranchPattern(cwd) {
       for (const match of line.matchAll(/`([^`\s]*<[^`\s]+>[^`\s]*)`/g)) {
         const template = match[1];
         if (!template.includes('/')) continue;
-        const pattern = template
-          .split(/(<[^>]+>)/)
-          .map((part) => (/^<[^>]+>$/.test(part) ? '[^/\\s]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-          .join('');
-        return { source, text: template, regex: new RegExp(`^${pattern}$`) };
+        return { source, text: template, regex: branchTemplateRegex(template) };
       }
     }
   }
