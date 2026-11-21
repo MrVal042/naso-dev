@@ -853,7 +853,7 @@ function renderDecisions(facts) {
  * the command that prints it, not by a path: the path is per machine, and an agent's file
  * tools are often kept out of .git.
  */
-function renderReadFirst(facts) {
+export function renderReadFirst(facts) {
   const handoff = facts.handoff;
   const decisions = facts.decisions ?? {};
   const handoffLine = handoff && handoff.where !== 'git'
@@ -869,7 +869,7 @@ function renderReadFirst(facts) {
     '2. This briefing.',
     decisionsLine,
     '',
-    `Update the handoff with \`${nasoCommand()} handoff add "…"\` when a PR opens or merges, when a decision is made, and before you stop.`,
+    `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`.`,
   ].join('\n');
 }
 

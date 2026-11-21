@@ -1,18 +1,27 @@
 #!/usr/bin/env node
 // NASO handoff — what one session leaves for the next.
 //
-// The biggest gain between sessions, and the easiest file to ruin: with nothing bounding
-// it, a handoff in the field passed 1,500 lines, and every session paid to read all of it.
-// So the file has one part that is read at session start, NOW, capped at NOW_CAP lines,
-// and entries leave it on their own: by age, and past the cap oldest first, into a
-// monthly archive that is read only when somebody asks for it.
+// The biggest gain between sessions, and the easiest file to ruin. Two ways it went wrong
+// in the field: with nothing bounding it, a handoff passed 1,500 lines; and when every
+// update was a new entry on top, each one restated the last, so the part meant to say
+// where things stand became a log.
+//
+// So the file has two parts that are kept differently:
+//
+//   NOW  one current state, replaced whole by `handoff set`: where things stand, the next
+//        steps, the open items. Read at every session start, so it is the part with a cap.
+//        Open items ("- [ ] …", "- Waiting on …") get an id and never age out; they leave
+//        only when somebody closes them.
+//   Log  dated history, newest first, added to by `handoff log`. Only the log ages out:
+//        past LOG_DAYS or LOG_CAP lines, oldest first, into a monthly archive nothing
+//        reads at session start.
 //
 // One file per repository, not per worktree. When .naso/ is committed it lives there and
 // travels with the branch like any tracked file. When it is kept local it lives under
 // the git common directory, the one place every linked worktree of a clone shares.
 
 import path from 'node:path';
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
 import { parseArgs, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, pathExists, run } from './lib.mjs';
 import { readDecisions } from './decisions.mjs';
 
@@ -20,11 +29,15 @@ export const NOW_START = '<!-- naso:now:start -->';
 export const NOW_END = '<!-- naso:now:end -->';
 export const WEEK_START = '<!-- naso:week:start -->';
 export const WEEK_END = '<!-- naso:week:end -->';
+export const LOG_START = '<!-- naso:log:start -->';
+export const LOG_END = '<!-- naso:log:end -->';
 
-/** Lines NOW may hold. About a screen: enough for the state of a week, cheap to read. */
+/** Lines NOW may hold before the gate warns. About a screen: cheap to read every session. */
 export const NOW_CAP = 60;
-/** Entries older than this many days leave NOW at the next add or trim. */
-export const NOW_DAYS = 14;
+/** Log lines kept below NOW; the oldest past this move to the archive. */
+export const LOG_CAP = 60;
+/** Log lines older than this many days move to the archive. */
+export const LOG_DAYS = 14;
 
 const REPO_FILE = path.join('.naso', 'HANDOFF.md');
 const ARCHIVE_DIR = 'handoff-archive';
@@ -86,17 +99,23 @@ export async function locateHandoff(cwd, { track } = {}) {
   return describe(inRepo, 'repo');
 }
 
-/** A new handoff. Says what goes in it and when, so a person or an agent with no NASO can use it. */
+/** A new handoff. Says how each part is kept, so a person or an agent with no NASO can use it. */
 export function renderHandoff({ archiveShown }) {
+  const cmd = nasoCommand();
   return [
     '# Handoff',
     '',
-    'What the last session left for the next one. Read NOW at the start of a session. Update it',
-    'when a PR opens or merges, when a decision is made, and before you stop: the current state,',
-    'open PRs and branches, the next steps, and who the work is waiting on.',
+    'What the last session left for the next one. Read NOW at the start of a session; read the',
+    'log only when you need the history.',
     '',
-    `\`${nasoCommand()} handoff add "…"\` adds a dated entry at the top. Entries older than ${NOW_DAYS} days,`,
-    `and the oldest past ${NOW_CAP} lines, move to the archive on their own.`,
+    `- NOW is one current state, replaced whole with \`${cmd} handoff set\`: where things stand, the`,
+    '  next steps, and the open items. Write an open item as `- [ ] …` or `- Waiting on <who>: …`;',
+    `  it gets an id, never ages out, and leaves only with \`${cmd} handoff done <id>\` or a set`,
+    '  that leaves it out.',
+    `- The log is dated history, newest first: \`${cmd} handoff log "…"\`. Lines older than ${LOG_DAYS}`,
+    `  days, and the oldest past ${LOG_CAP}, move to the archive on their own.`,
+    '',
+    'Update both when a PR opens or merges, when a decision is made, and before you stop.',
     '',
     '## NOW',
     '',
@@ -110,10 +129,15 @@ export function renderHandoff({ archiveShown }) {
     WEEK_START,
     WEEK_END,
     '',
+    '## Log',
+    '',
+    LOG_START,
+    LOG_END,
+    '',
     '## Archive',
     '',
-    `Older entries are in \`${archiveShown}\`, one file per month (YYYY-MM.md). Read them only when`,
-    'somebody asks about older work.',
+    `Older log lines are in \`${archiveShown}\`, one file per month (YYYY-MM.md). Read them only`,
+    'when somebody asks about older work.',
     '',
   ].join('\n');
 }
@@ -130,29 +154,97 @@ export function nowSection(text) {
   return between(text, NOW_START, NOW_END)?.body ?? text;
 }
 
-/**
- * NOW as { head, entries }. An entry is a list item at the start of a line plus every line
- * under it up to the next one. Anything above the first entry is a person's own note and
- * is never moved.
- */
-function parseNow(body) {
-  const lines = body.split('\n').map((line) => line.replace(/\r$/, ''));
-  const head = [];
-  const entries = [];
-  for (const line of lines) {
-    if (/^[-*]\s/.test(line)) entries.push([line]);
-    else if (entries.length > 0) entries.at(-1).push(line);
-    else head.push(line);
-  }
-  for (const entry of entries) {
-    while (entry.length > 1 && entry.at(-1).trim() === '') entry.pop();
-  }
-  return { head: head.filter((line) => line.trim() !== ''), entries };
+/** The text between the log markers, or '' when there are none. */
+export function logSection(text) {
+  return between(text, LOG_START, LOG_END)?.body ?? '';
 }
 
-function joinNow({ head, entries }) {
-  const lines = [...head, ...entries.flat()];
-  return lines.length > 0 ? `\n${lines.join('\n')}\n` : '\n';
+/** Lines in NOW that are not blank. */
+export function nowLineCount(text) {
+  return nowSection(text).split('\n').filter((line) => line.trim() !== '').length;
+}
+
+const OPEN_ITEM = /^[-*]\s+\[ \]\s+(?:\((\d+)\)\s+)?(.*)$/;
+const WAITING = /^[-*]\s+(?:\((\d+)\)\s+)?(waiting on\b.*)$/i;
+const CLOSED_IN_LOG = /\b(?:done|closed) \((\d+)\)/g;
+
+/** The open items in NOW: `{ id, text, from, to }`, lines `from`..`to` of NOW's body. */
+export function openItems(text) {
+  const lines = nowSection(text).split('\n');
+  const items = [];
+  for (let i = 0; i < lines.length; i++) {
+    const match = OPEN_ITEM.exec(lines[i].replace(/\r$/, ''));
+    if (!match || !match[1]) continue;
+    let to = i;
+    while (to + 1 < lines.length && /^\s+\S/.test(lines[to + 1])) to++;
+    items.push({ id: Number(match[1]), text: match[2].trim(), from: i, to });
+  }
+  return items;
+}
+
+function highestId(text) {
+  const ids = [
+    ...openItems(text).map((item) => item.id),
+    ...[...logSection(text).matchAll(CLOSED_IN_LOG)].map((match) => Number(match[1])),
+  ];
+  return Math.max(0, ...ids);
+}
+
+function withSection(text, start, end, body, heading) {
+  const parts = between(text, start, end);
+  if (!parts) return `${text.trimEnd()}\n\n## ${heading}\n\n${start}${body}${end}\n`;
+  return `${parts.before}${body}${parts.after}`;
+}
+
+const asBody = (lines) => (lines.length > 0 ? `\n${lines.join('\n')}\n` : '\n');
+
+function logLines(text) {
+  return logSection(text).split('\n').map((line) => line.replace(/\r$/, '')).filter((line) => line.trim() !== '');
+}
+
+/** A dated line at the top of the log. Continuation lines are indented under it. Never trims. */
+export function logEntry(text, entryText, { today: on = today() } = {}) {
+  const [first, ...rest] = String(entryText).trim().split(/\r?\n/);
+  const entry = [`- ${on}: ${first}`, ...rest.filter((line) => line.trim()).map((line) => `  ${line.trim()}`)];
+  return withSection(text, LOG_START, LOG_END, asBody([...entry, ...logLines(text)]), 'Log');
+}
+
+/**
+ * Replace NOW. Every open item and waiting line gets an id, keeping the one it had; a
+ * waiting line becomes an open item so there is one way to close things. An open item
+ * that was in NOW and is not in the new state is closed, and the log says so: a set that
+ * silently dropped one would lose the only record that it was ever open.
+ *
+ * Returns { text, items, closed }.
+ */
+export function setNow(text, state, { today: on = today() } = {}) {
+  const before = openItems(text);
+  let next = highestId(text);
+  const lines = String(state).replace(/\r\n?/g, '\n').trim().split('\n').map((line) => {
+    const open = OPEN_ITEM.exec(line);
+    if (open) return `- [ ] (${open[1] ?? ++next}) ${open[2].trim()}`;
+    const waiting = WAITING.exec(line);
+    if (waiting) return `- [ ] (${waiting[1] ?? ++next}) ${waiting[2].trim()}`;
+    return line.trimEnd();
+  });
+  let result = withSection(text, NOW_START, NOW_END, asBody(lines.join('\n').trim() ? lines : []), 'NOW');
+  const kept = new Set(openItems(result).map((item) => item.id));
+  const closed = before.filter((item) => !kept.has(item.id));
+  for (const item of [...closed].reverse()) result = logEntry(result, `closed (${item.id}) ${item.text}`, { today: on });
+  return { text: result, items: openItems(result), closed };
+}
+
+/** Close one open item by id: out of NOW, into the log. `closed` is null when there is no such item. */
+export function closeItem(text, id, { today: on = today() } = {}) {
+  const item = openItems(text).find((candidate) => candidate.id === Number(id));
+  if (!item) return { text, closed: null };
+  const lines = nowSection(text).split('\n');
+  lines.splice(item.from, item.to - item.from + 1);
+  // Only the item goes. Blank lines a person put between paragraphs stay; blank lines left
+  // at either end, and a double blank where the item was, do not.
+  const body = lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+  const result = withSection(text, NOW_START, NOW_END, asBody(body ? body.split('\n') : []), 'NOW');
+  return { text: logEntry(result, `done (${item.id}) ${item.text}`, { today: on }), closed: item };
 }
 
 const dateOf = (entry) => /^[-*]\s+(\d{4}-\d{2}-\d{2})\b/.exec(entry[0])?.[1] ?? null;
@@ -161,36 +253,24 @@ function daysBetween(from, to) {
   return Math.round((Date.parse(`${to}T00:00:00Z`) - Date.parse(`${from}T00:00:00Z`)) / 86_400_000);
 }
 
-function withNow(text, now) {
-  const parts = between(text, NOW_START, NOW_END);
-  if (!parts) return `${text.trimEnd()}\n\n## NOW\n\n${NOW_START}${joinNow(now)}${NOW_END}\n`;
-  return `${parts.before}${joinNow(now)}${parts.after}`;
-}
-
-/** A dated entry at the top of NOW. Continuation lines are indented under it. */
-export function addEntry(text, entryText, { today: on = today() } = {}) {
-  const [first, ...rest] = String(entryText).trim().split(/\r?\n/);
-  const entry = [`- ${on}: ${first}`, ...rest.map((line) => (line.trim() ? `  ${line.trim()}` : ''))];
-  const now = parseNow(nowSection(text));
-  return withNow(text, { head: now.head, entries: [entry, ...now.entries] });
-}
-
 /**
- * Move entries out of NOW: those older than `days`, then the oldest until NOW fits in `cap`
- * lines. Returns the new text and the moved entries grouped by month, each month newest
- * first. An undated entry never ages out; past the cap it goes to this month.
+ * Move log lines out: those older than `days`, then the oldest until the log fits in `cap`
+ * lines. NOW is never touched. Returns the new text and the moved entries grouped by month,
+ * each month newest first. The newest entry always stays, however long it is.
  */
-export function trimHandoff(text, { today: on = today(), days = NOW_DAYS, cap = NOW_CAP } = {}) {
-  const now = parseNow(nowSection(text));
+export function trimLog(text, { today: on = today(), days = LOG_DAYS, cap = LOG_CAP } = {}) {
+  const entries = [];
+  for (const line of logLines(text)) {
+    if (/^[-*]\s/.test(line) || entries.length === 0) entries.push([line]);
+    else entries.at(-1).push(line);
+  }
   const keep = [];
   const out = [];
-  for (const entry of now.entries) {
+  for (const entry of entries) {
     const date = dateOf(entry);
     (date && daysBetween(date, on) > days ? out : keep).push(entry);
   }
-  let lines = now.head.length + keep.flat().length;
-  // Always keep the newest entry, however long it is: a NOW with nothing in it says
-  // nothing about the state the last session left.
+  let lines = keep.flat().length;
   while (lines > cap && keep.length > 1) {
     const oldest = keep.pop();
     lines -= oldest.length;
@@ -204,12 +284,8 @@ export function trimHandoff(text, { today: on = today(), days = NOW_DAYS, cap = 
   for (const month of Object.keys(moved)) {
     moved[month].sort((a, b) => (dateOf([b]) ?? '').localeCompare(dateOf([a]) ?? ''));
   }
-  return { text: withNow(text, { head: now.head, entries: keep }), moved, lines };
-}
-
-/** Lines in NOW that are not blank. */
-export function nowLineCount(text) {
-  return nowSection(text).split('\n').filter((line) => line.trim() !== '').length;
+  if (out.length === 0) return { text, moved };
+  return { text: withSection(text, LOG_START, LOG_END, asBody(keep.flat()), 'Log'), moved };
 }
 
 /** Decisions dated in the last week, as links to their records. */
@@ -223,7 +299,7 @@ async function weekSection(root, on) {
     })
     .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
   if (recent.length === 0) return '\n';
-  const title = (record) => String(record.title).replace(new RegExp(`^${record.id}\\s*[-—:]?\\s*`), '');
+  const title = (record) => String(record.title).replace(new RegExp(`^${record.id}\\.?\\s*[-—:]?\\s*`), '');
   return `\n${recent.map((record) => `- ${record.id} ${title(record)} (${record.status ?? 'no status'}): \`${record.file}\``).join('\n')}\n`;
 }
 
@@ -240,7 +316,7 @@ async function writeAtomic(file, text) {
   await rename(temp, file);
 }
 
-const archiveHeader = (month) => `# Handoff archive, ${month}\n\nEntries that left NOW, newest first. Read only on request.\n\n`;
+const archiveHeader = (month) => `# Handoff archive, ${month}\n\nLog lines that left the handoff, newest first. Read only on request.\n\n`;
 
 async function appendToArchive(archiveDir, moved) {
   const written = [];
@@ -266,15 +342,16 @@ export async function ensureHandoff(cwd, { track } = {}) {
   return { located, created: true };
 }
 
-/** Read, change, trim, refresh the week, write. Returns what moved. */
-async function update(cwd, change, { days, cap }) {
+/** Read, change, trim the log, refresh the week, write. `change` returns the text or { text, … }. */
+async function update(cwd, change, limits) {
   const { located } = await ensureHandoff(cwd);
   const on = today();
-  const before = await readFile(located.file, 'utf8');
-  const { text, moved } = trimHandoff(change(before), { today: on, days, cap });
+  const changed = change(await readFile(located.file, 'utf8'), on);
+  const result = typeof changed === 'string' ? { text: changed } : changed;
+  const { text, moved } = trimLog(result.text, { today: on, ...limits });
   const archived = await appendToArchive(located.archiveDir, moved);
   await writeAtomic(located.file, withWeek(text, await weekSection(located.root, on)));
-  return { located, archived, lines: nowLineCount(text) };
+  return { ...result, text, located, archived };
 }
 
 const numberOption = (values, key, fallback) => {
@@ -285,51 +362,126 @@ const numberOption = (values, key, fallback) => {
 
 function printArchived(archived, located) {
   for (const { month, count } of archived) {
-    console.log(`Moved ${count} ${count === 1 ? 'entry' : 'entries'} to ${toPosixPath(path.relative(located.root, path.join(located.archiveDir, `${month}.md`)))}`);
+    console.log(`Moved ${count} log ${count === 1 ? 'line' : 'lines'} to ${toPosixPath(path.relative(located.root, path.join(located.archiveDir, `${month}.md`)))}`);
   }
+}
+
+const isDirectory = async (candidate) => (await stat(candidate).catch(() => null))?.isDirectory() ?? false;
+
+async function readStdin() {
+  if (process.stdin.isTTY) return '';
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString('utf8');
+}
+
+/** `[text, target]` from the words after a subcommand, where the text may be left out. */
+async function textAndTarget(rest) {
+  if (rest.length >= 2) return [rest[0], rest[1]];
+  if (rest.length === 1 && (await isDirectory(rest[0]))) return [null, rest[0]];
+  return [rest[0] ?? null, undefined];
+}
+
+function refuse(message) {
+  console.error(message);
+  process.exitCode = 1;
+}
+
+function printNow(text, located) {
+  const now = nowSection(text).trim();
+  console.log(`NOW, from ${located.shown}:\n`);
+  console.log(now || `(empty) Say where things stand: ${nasoCommand()} handoff set "…"`);
+  const count = nowLineCount(text);
+  if (count > NOW_CAP) console.log(`\nNOW is ${count} lines, over its cap of ${NOW_CAP}. Replace it with a shorter state: ${nasoCommand()} handoff set`);
 }
 
 export async function main(argv = process.argv.slice(2)) {
   const { flags, values, positional } = parseArgs(argv);
+  const cmd = nasoCommand();
   if (flags.has('help') || flags.has('h')) {
     console.log(`NASO handoff
 
 Usage:
-  ${nasoCommand()} handoff [target-dir]                 create it if missing, then print NOW
-  ${nasoCommand()} handoff add "<text>" [target-dir]    a dated entry at the top of NOW
-  ${nasoCommand()} handoff trim [target-dir]            move old entries to the archive
-  ${nasoCommand()} handoff path [target-dir]            print where the handoff is
+  ${cmd} handoff [target-dir]                    create it if missing, then print NOW
+  ${cmd} handoff set "<state>" [target-dir]      replace NOW (also --file <path>, or - for stdin)
+  ${cmd} handoff log "<text>" [target-dir]       a dated line at the top of the log
+  ${cmd} handoff done <id> [target-dir]          close an open item: out of NOW, into the log
+  ${cmd} handoff trim [target-dir]               move old log lines to the archive
+  ${cmd} handoff path [target-dir]               print where the handoff is
 
-  --days <n>        entries older than this leave NOW (default ${NOW_DAYS})
-  --max-lines <n>   NOW's cap; the oldest entries leave past it (default ${NOW_CAP})
+  --days <n>        log lines older than this leave the log (default ${LOG_DAYS})
+  --max-lines <n>   the log's cap; the oldest lines leave past it (default ${LOG_CAP})
 
-Committed .naso/ keeps it in .naso/HANDOFF.md. Otherwise it is under the git directory,
-shared by every worktree of the clone. Add and trim move entries to a monthly archive
-beside it, which nothing reads at session start.`);
+NOW is one state, replaced whole. In it, "- [ ] …" and "- Waiting on …" lines are open items:
+they get an id, never age out, and leave only with done or a set that leaves them out. Only
+the log ages out, into a monthly archive that nothing reads at session start.
+
+Committed .naso/ keeps the handoff in .naso/HANDOFF.md. Otherwise it is under the git
+directory, shared by every worktree of the clone.`);
     return;
   }
 
-  const sub = ['add', 'trim', 'path'].includes(positional[0]) ? positional[0] : null;
+  const known = ['set', 'log', 'add', 'done', 'trim', 'path'];
+  const sub = known.includes(positional[0]) ? positional[0] : null;
   const rest = sub ? positional.slice(1) : positional;
-  const limits = { days: numberOption(values, 'days', NOW_DAYS), cap: numberOption(values, 'max-lines', NOW_CAP) };
+  const limits = { days: numberOption(values, 'days', LOG_DAYS), cap: numberOption(values, 'max-lines', LOG_CAP) };
 
-  if (sub === 'add') {
-    const [entryText, target] = rest;
-    if (!entryText || !entryText.trim() || (rest.length === 1 && (await pathExists(entryText)) && !/\s/.test(entryText))) {
-      console.error(`naso-dev handoff add: say what to add, in quotes: ${nasoCommand()} handoff add "Opened the parser PR; waiting on review."`);
-      process.exitCode = 1;
-      return;
+  if (sub === 'set') {
+    let state;
+    let target;
+    if (values.has('file')) {
+      state = await readFile(path.resolve(values.get('file')), 'utf8').catch(() => null);
+      target = rest[0];
+      if (state === null) return refuse(`naso-dev handoff set: cannot read ${values.get('file')}.`);
+    } else if (rest[0] === '-' || flags.has('file')) {
+      state = await readStdin();
+      target = rest[1];
+    } else {
+      [state, target] = await textAndTarget(rest);
+      if (state === null) state = await readStdin();
     }
-    const { located, archived, lines } = await update(target ?? process.cwd(), (text) => addEntry(text, entryText), limits);
-    console.log(`Added to NOW in ${located.shown} (${lines} of ${limits.cap} lines).`);
-    printArchived(archived, located);
+    if (!state || !state.trim()) {
+      return refuse(`naso-dev handoff set: give the new state: ${cmd} handoff set "Where things stand. Next: … - [ ] open item", --file <path>, or - to read stdin.`);
+    }
+    const result = await update(target ?? process.cwd(), (text, on) => setNow(text, state, { today: on }), limits);
+    console.log(`Replaced NOW in ${result.located.shown}.`);
+    for (const item of result.items) console.log(`  open (${item.id}) ${item.text}`);
+    for (const item of result.closed) console.log(`  closed (${item.id}) ${item.text}: it was not in the new state, so the log records it as closed`);
+    if (nowLineCount(result.text) > NOW_CAP) console.log(`NOW is ${nowLineCount(result.text)} lines, over its cap of ${NOW_CAP}. Say less: it is read at every session start.`);
+    printArchived(result.archived, result.located);
+    return;
+  }
+
+  if (sub === 'log' || sub === 'add') {
+    if (sub === 'add') console.error(`naso-dev: handoff add is now handoff log; replace the current state with handoff set.`);
+    const [entryText, target] = await textAndTarget(rest);
+    if (!entryText || !entryText.trim()) {
+      return refuse(`naso-dev handoff log: say what happened, in quotes: ${cmd} handoff log "Opened the parser PR."`);
+    }
+    const result = await update(target ?? process.cwd(), (text, on) => logEntry(text, entryText, { today: on }), limits);
+    console.log(`Logged in ${result.located.shown}.`);
+    printArchived(result.archived, result.located);
+    return;
+  }
+
+  if (sub === 'done') {
+    const [id, target] = rest;
+    if (!/^\d+$/.test(String(id ?? ''))) return refuse(`naso-dev handoff done: give the item's number: ${cmd} handoff done 3`);
+    const located = await locateHandoff(target ?? process.cwd());
+    const text = await readFile(located.file, 'utf8').catch(() => null);
+    if (text === null || !closeItem(text, id).closed) {
+      return refuse(`naso-dev handoff done: there is no open item (${id}) in ${located.shown}. ${cmd} handoff lists them.`);
+    }
+    const result = await update(target ?? process.cwd(), (current, on) => closeItem(current, id, { today: on }), limits);
+    console.log(`Closed (${result.closed.id}) ${result.closed.text}; the log records it.`);
+    printArchived(result.archived, result.located);
     return;
   }
 
   if (sub === 'trim') {
-    const { located, archived, lines } = await update(rest[0] ?? process.cwd(), (text) => text, limits);
-    if (archived.length === 0) console.log(`Nothing to move: NOW in ${located.shown} is ${lines} of ${limits.cap} lines, none older than ${limits.days} days.`);
-    printArchived(archived, located);
+    const result = await update(rest[0] ?? process.cwd(), (text) => text, limits);
+    if (result.archived.length === 0) console.log(`Nothing to move: the log in ${result.located.shown} is within ${limits.cap} lines and ${limits.days} days.`);
+    printArchived(result.archived, result.located);
     return;
   }
 
@@ -340,12 +492,7 @@ beside it, which nothing reads at session start.`);
 
   const { located, created } = await ensureHandoff(rest[0] ?? process.cwd());
   if (created) console.log(`Created ${located.shown}${located.where === 'git' ? ' (in the git directory, shared by every worktree, never committed)' : ''}.\n`);
-  const text = await readFile(located.file, 'utf8');
-  const now = nowSection(text).trim();
-  console.log(`NOW, from ${located.shown}:\n`);
-  console.log(now || `(empty) Add the state of the work: ${nasoCommand()} handoff add "…"`);
-  const count = nowLineCount(text);
-  if (count > limits.cap) console.log(`\nNOW is ${count} lines, over its cap of ${limits.cap}. Run: ${nasoCommand()} handoff trim`);
+  printNow(await readFile(located.file, 'utf8'), located);
 }
 
 if (isMainModule(import.meta.url)) {

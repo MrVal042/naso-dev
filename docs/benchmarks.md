@@ -82,19 +82,25 @@ commits, and the change against this baseline.
 
 Setup now writes a handoff and puts a Read First section at the top of the block. Same
 repositories, same commits, `--force` to regenerate. Setup kept every handoff local, so it is
-`.git/naso/HANDOFF.md`, and its NOW section is empty until somebody adds to it.
+`.git/naso/HANDOFF.md`, and its NOW section is empty until somebody sets it.
 
 | Repository | Baseline | Phase 1 | Change | Read First | Handoff NOW, empty |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| changesets/changesets | 1,911 | 2,004 | +93 | 92 | 1 |
-| psf/requests | 1,490 | 1,581 | +91 | 90 | 1 |
-| spf13/cobra | 1,506 | 1,596 | +90 | 90 | 1 |
-| BurntSushi/ripgrep | 1,701 | 1,791 | +90 | 90 | 1 |
-| google/gson | 1,696 | 1,787 | +91 | 90 | 1 |
-| terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,404 | +90 | 90 | 1 |
-| naso-dev | 1,670 | 1,760 | +90 | 90 | 1 |
-| field repository, as generated | 1,576 | 1,669 | +93 | 92 | 1 |
+| changesets/changesets | 1,911 | 2,026 | +115 | 115 | 1 |
+| psf/requests | 1,490 | 1,602 | +112 | 111 | 1 |
+| spf13/cobra | 1,506 | 1,618 | +112 | 111 | 1 |
+| BurntSushi/ripgrep | 1,701 | 1,813 | +112 | 111 | 1 |
+| google/gson | 1,696 | 1,808 | +112 | 111 | 1 |
+| terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,426 | +112 | 111 | 1 |
+| naso-dev | 1,670 | 1,782 | +112 | 111 | 1 |
+| field repository, as generated | 1,576 | 1,691 | +115 | 114 | 1 |
 
-Median 1,670 → 1,760 (+5.4%). A NOW section at its 60-line cap adds about 600–900 tokens,
-depending on line length, and the cap is what keeps it there: unbounded, the field handoff
-this replaces passed 1,500 lines. Phase 4 has to win the Read First cost back.
+Median 1,670 → 1,782 (+6.7%). Read First names both handoff commands (`set` for NOW, `log`
+for history) and what NOW holds, because the handoff's own explanation is not loaded at
+session start and NOW is.
+
+A realistic NOW, a state paragraph, two next steps and two open items, is 65 tokens
+(cobra: 1,618 → 1,682). NOW is replaced, not added to, so it stays that size however many
+sessions update it; only the log grows, and the log is not loaded. At its 60-line cap NOW
+would be about 600–900 tokens, and the gate warns before that. Phase 4 has to win the Read
+First cost back.
