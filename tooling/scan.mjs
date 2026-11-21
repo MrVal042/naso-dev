@@ -1189,6 +1189,13 @@ export function labelForInvocation(command, scripts = {}) {
   // that names something the manifest has lost is still the truth about what runs, and
   // echoing the whole command back would make the label useless for coverage matching.
   if (script) return script;
+  // `npm test` is `npm run test`, as are `npm t` and `npm start`. pnpm and yarn run a script
+  // without `run` too, unless a command of their own has the name, so only a script that
+  // package.json declares counts. `bun test` is bun's own test runner, not the script.
+  const lifecycle = cleaned.match(/^(?:npm|pnpm|yarn)\s+(test|t|tst|start|stop|restart)(?=\s|$)/)?.[1];
+  if (lifecycle) return lifecycle === 't' || lifecycle === 'tst' ? 'test' : lifecycle;
+  const bare = cleaned.match(/^(?:pnpm|yarn)\s+([A-Za-z][\w:.-]*)(?=\s|$)/)?.[1];
+  if (bare && typeof scripts[bare] === 'string') return bare;
   if (/^(?:npx\s+)?tsc\b/.test(cleaned)) return 'typecheck';
   if (/^expo\s+check/.test(cleaned)) return 'expo check';
   if (/^expo\s+lint/.test(cleaned)) return 'lint';

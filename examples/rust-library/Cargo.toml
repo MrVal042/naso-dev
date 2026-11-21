@@ -1,0 +1,9 @@
+[package]
+name = "slugline"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Turn titles into URL slugs"
+
+[lib]
+path = "src/lib.rs"

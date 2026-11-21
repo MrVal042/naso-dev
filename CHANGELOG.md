@@ -20,6 +20,17 @@
 - **Pointers for other agents: Cursor, Copilot, Gemini and Windsurf.** `naso-dev agents <name…|all>`, or `--agents` at setup, writes one line in each agent's own file that sends it to AGENTS.md, never a copy: `.cursor/rules/naso.mdc` and `.windsurf/rules/naso.md` as rules applied to every request, `.github/copilot-instructions.md`, and `GEMINI.md` with Gemini CLI's own `@AGENTS.md` import. Codex reads AGENTS.md itself and gets nothing. A file a person keeps is appended to inside naso markers; one that already names AGENTS.md (or a `.cursorrules`, another rule file, or `.gemini/settings.json` that does) is left alone; one git tracks is left alone in a local run, with the line to add. A file it creates in a local run is kept out of git. In a terminal setup asks, No by default, and offers the agents the repository is set up for first; with `--yes` and no `--agents` it writes none and names each agent it detected with the flag that would point it. `naso-dev agents` with no name says which agents a repository uses and whether each loads AGENTS.md. Each pointer is 34–57 tokens, loaded only by its own agent.
 - **`naso-dev workspace`** for a folder that holds several repositories and is not one itself. It finds them two levels down (a `.git` folder, or a `.git` file in a linked worktree; hidden and dependency folders are skipped), runs no git command in the folder, changes nothing inside a repository, and shows its plan before writing: an AGENTS.md block with one row per repository (its briefing, its default owners from CODEOWNERS, and what this machine may write in it, from its `.naso/config.json` or `--read-only`; a column no repository has a source for is left out), the CLAUDE.md link, a shared handoff in `.naso/HANDOFF.md` for state that spans repositories, and `.naso/config.json`. `--read-only` is remembered. A block people edited is kept unless `--force`, which saves it under `.naso/backups/` first. Run again, it adds new repositories, and with nothing new it writes nothing. The handoff commands resolve to the folder even when it sits inside another git repository.
 
+### Fixed
+
+- **`npm test` counts as running the test script.** A CI job that ran `npm test` (or `npm t`, `npm start`, or `pnpm lint` and `yarn lint` without `run`) had the briefing say "Declared but not run by CI: `npm run test`". `pnpm` and `yarn` count only for a script package.json declares, so `pnpm install` is still pnpm's own; `bun test` is bun's own test runner and is not the script.
+
+### Documentation
+
+- **A README that fits on one screen**: what NASO does in one line, badges, a demo recorded from a real run (`docs/demo/setup.svg`, re-recorded by `node docs/demo/record.mjs`), a three-command quick start, the agents it works with, and the token numbers. The full reference moved to `docs/reference.md`, word for word.
+- **`examples/`**: an Expo app, a NestJS API, a Python service, a Go CLI, a Rust library, a Terraform module and a pnpm monorepo, each with what NASO wrote for it (644–966 tokens at session start). `node examples/build.mjs` regenerates them from the real setup.
+- **`docs/comparison.md`**: NASO beside a hand-written AGENTS.md, Claude Code's `/init`, rule-sync tools and repository packers, including where NASO is weaker.
+- **`docs/good-first-issues.md`**, issue and pull request templates, and launch drafts in `docs/launch/` (not posted).
+
 ### Changed
 
 - **The review prompt is shorter** (its fixed text is 19% smaller), covers the guides, and asks for the block to stay under 60 lines.

@@ -40,7 +40,13 @@
     "developer-tools",
     "cli",
     "naso",
-    "naso-dev"
+    "naso-dev",
+    "agents-md",
+    "context-engineering",
+    "handoff",
+    "token-efficiency",
+    "gemini",
+    "windsurf"
   ],
   "repository": {
     "type": "git",

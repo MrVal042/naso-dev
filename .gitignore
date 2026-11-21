@@ -4,7 +4,9 @@ node_modules/
 # `npm pack` output.
 *.tgz
 
-# A vendored NASO install, if this repository is ever set up with itself.
-.naso/
-# No dependencies, so nothing to lock. npm writes one on `npm install` anyway.
-package-lock.json
+# A vendored NASO install, if this repository is ever set up with itself. Root only:
+# examples/ commits what NASO wrote for each example.
+/.naso/
+# No dependencies, so nothing to lock. npm writes one on `npm install` anyway. Root only:
+# the examples keep theirs, because NASO reads a lockfile to name the package manager.
+/package-lock.json

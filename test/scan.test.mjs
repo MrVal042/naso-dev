@@ -18,6 +18,7 @@ import {
   seedGroundTruth,
   sectionOf,
   readBriefing,
+  naso,
 } from './helpers.mjs';
 
 test('a gitignored build directory is not counted, described or listed', async () => {
@@ -802,5 +803,34 @@ test('an alias to the repository root is said to point there, not at "*"', async
     assert.ok((await createBriefing(dir, { force: true })).ok);
     const text = await readBriefing(dir);
     assert.match(text, /^Import aliases: @ → the repository root \(tsconfig\.json as @\/\*\)\./m);
+  });
+});
+
+test('npm test, and pnpm or yarn running a script without "run", count as running that script', async () => {
+  const { labelForInvocation } = await import('../tooling/scan.mjs');
+  const scripts = { test: 'jest', lint: 'eslint .', start: 'node .' };
+  assert.equal(labelForInvocation('npm test', scripts), 'test');
+  assert.equal(labelForInvocation('npm t', scripts), 'test');
+  assert.equal(labelForInvocation('yarn test', scripts), 'test');
+  assert.equal(labelForInvocation('pnpm test', scripts), 'test');
+  assert.equal(labelForInvocation('npm start', scripts), 'start');
+  assert.equal(labelForInvocation('pnpm lint', scripts), 'lint');
+  assert.equal(labelForInvocation('yarn lint --fix', scripts), 'lint');
+  // pnpm install is pnpm's own command, not a script; bun test is bun's own test runner.
+  assert.equal(labelForInvocation('pnpm install', scripts), 'pnpm install');
+  assert.equal(labelForInvocation('bun test', scripts), 'bun test');
+});
+
+test('a CI job that runs npm test is not told it leaves the test script unrun', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await put(dir, 'package.json', JSON.stringify({ name: 'ci-test', scripts: { lint: 'eslint .', test: 'jest' } }));
+    await put(dir, 'package-lock.json', '{"lockfileVersion":3}\n');
+    await put(dir, 'src/index.js', 'export const x = 1;\n');
+    await put(dir, '.github/workflows/ci.yml', 'name: ci\non: [push]\njobs:\n  test:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - run: npm ci\n      - run: npm run lint\n      - run: npm test\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'init');
+    const res = await naso([dir, '--yes', '--no-hook'], dir);
+    assert.equal(res.code, 0, res.stdout + res.stderr);
+    assert.doesNotMatch(await read(dir, 'AGENTS.md'), /Declared but not run by CI: [^\n]*npm run test/);
   });
 });
