@@ -85,9 +85,8 @@ export function escapeCommand(file) {
  * command and no %NAME% is expanded. Escaped quotes also mean cmd.exe never enters a
  * quoted state where ^ would stop working.
  *
- * `twice` escapes again, for a .cmd or .bat that passes %* on to another program: npm,
- * npx, pnpm, yarn and bun are all such shims, and cmd.exe parses the line once to start
- * the shim and again when the shim runs its own line.
+ * `twice` escapes again, for a shim that passes %* on to another program (passesArgsOn):
+ * cmd.exe parses the line once to start the shim and again when the shim runs its own line.
  */
 export function escapeArgument(arg, twice = false) {
   let quoted = String(arg)
@@ -95,6 +94,21 @@ export function escapeArgument(arg, twice = false) {
     .replace(/(\\*)$/, '$1$1');
   quoted = `"${quoted}"`.replace(CMD_META, '^$1');
   return twice ? quoted.replace(CMD_META, '^$1') : quoted;
+}
+
+/** Package managers whose Windows .cmd shim hands %* to node. */
+const ARG_FORWARDING_SHIMS = new Set(['npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'yarnpkg', 'bun', 'bunx', 'corepack']);
+
+/**
+ * Whether a .cmd re-parses its arguments by passing %* on to another program, so cmd.exe
+ * reads them a second time and they need escaping twice. True for the package-manager
+ * shims and for every node_modules\\.bin shim (cross-spawn's rule). A plain .cmd is escaped
+ * once: escaping it twice would hand it literal carets.
+ */
+export function passesArgsOn(file) {
+  const normal = String(file).replace(/\//g, '\\');
+  if (/node_modules\\\.bin\\[^\\]+\.cmd$/i.test(normal)) return true;
+  return /\.cmd$/i.test(normal) && ARG_FORWARDING_SHIMS.has(path.win32.basename(normal, path.win32.extname(normal)).toLowerCase());
 }
 
 /**
@@ -123,7 +137,8 @@ export function spawnPlan(cmd, args = [], { platform = process.platform, env = p
       const candidate = dir ? win.join(dir, name) : name;
       if (!isFile(candidate)) continue;
       if (/\.(cmd|bat)$/i.test(candidate)) {
-        const line = [escapeCommand(candidate), ...args.map((arg) => escapeArgument(arg, true))].join(' ');
+        const twice = passesArgsOn(candidate);
+        const line = [escapeCommand(candidate), ...args.map((arg) => escapeArgument(arg, twice))].join(' ');
         return { cmd: envValue(env, 'COMSPEC') || 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], shell: false, verbatim: true };
       }
       return { cmd: candidate, args, shell: false, verbatim: false };

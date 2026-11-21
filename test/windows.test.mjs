@@ -51,6 +51,26 @@ test('on Windows, a .cmd runs as ComSpec /d /s /c with one escaped line and verb
   );
 });
 
+test('a plain .cmd is escaped once: it does not pass %* on, so cmd.exe parses its line once', () => {
+  const plan = spawnPlan('C:\\tools\\build.cmd', ['a&b', '100%'], { platform: 'win32', env: winEnv, isFile: files('C:\\tools\\build.cmd') });
+  assert.equal(plan.verbatim, true);
+  assert.equal(plan.args[3], '"C:\\tools\\build.cmd ^"a^&b^" ^"100^%^""');
+});
+
+test('a node_modules\\.bin shim is escaped twice, like the package managers', () => {
+  const shim = 'C:\\repo\\node_modules\\.bin\\prettier.cmd';
+  const plan = spawnPlan(shim, ['a&b'], { platform: 'win32', env: winEnv, isFile: files(shim) });
+  assert.equal(plan.args[3], `"${escapeCommand(shim)} ^^^"a^^^&b^^^""`);
+});
+
+test('every package-manager .cmd is escaped twice, found on Path by its bare name', () => {
+  for (const name of ['npm', 'npx', 'pnpm', 'pnpx', 'yarn', 'yarnpkg', 'bun', 'bunx', 'corepack']) {
+    const file = `C:\\Program Files\\nodejs\\${name}.cmd`;
+    const plan = spawnPlan(name, ['a&b'], { platform: 'win32', env: winEnv, isFile: files(file) });
+    assert.match(plan.args[3], / \^\^\^"a\^\^\^&b\^\^\^""$/, name);
+  }
+});
+
 test('every cmd.exe metacharacter in an argument is escaped, twice for a .cmd shim', () => {
   const cases = [
     ['a b', '^"a^ b^"'],
@@ -95,7 +115,7 @@ test('a command that is not on Path is left for spawn to report, unchanged', () 
 const HOSTILE = ['plain', 'with space', 'a&b', 'a|b', '<x>', '100%PATH%', 'c^d', '(paren)', 'say "hi"', 'trailing\\', 'x;y,z', '!bang!', '*?'];
 
 /**
- * A .cmd that forwards %* to node, like every package-manager shim, in a folder whose name
+ * An npm.cmd that forwards %* to node, like every package-manager shim, in a folder whose name
  * has a space, an ampersand and parentheses. What reaches node must be the arguments as
  * given, each one whole, and nothing may have run as a command.
  */
@@ -107,16 +127,31 @@ test('a real .cmd shim receives every hostile argument exactly, and runs nothing
     const out = path.join(root, 'argv.json');
     const dump = path.join(bin, 'dump.cjs');
     await writeFile(dump, `require('fs').writeFileSync(${JSON.stringify(out)}, JSON.stringify(process.argv.slice(2)));\n`);
-    await writeFile(path.join(bin, 'fakepm.cmd'), `@"${process.execPath}" "${dump}" %*\r\n`);
+    // Named npm.cmd: a shim that passes %* on is escaped twice, by name, like the real one.
+    await writeFile(path.join(bin, 'npm.cmd'), `@"${process.execPath}" "${dump}" %*\r\n`);
     const saved = process.env.Path ?? process.env.PATH;
     process.env.Path = `${bin};${saved}`;
     try {
-      const res = await run('fakepm', HOSTILE, { cwd: root });
+      const res = await run('npm', HOSTILE, { cwd: root });
       assert.equal(res.ok, true, res.stderr);
     } finally {
       process.env.Path = saved;
     }
     assert.deepEqual(JSON.parse(await readFile(out, 'utf8')), HOSTILE);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('a hostile argument to a plain .cmd cannot make cmd.exe run a command', { skip: process.platform !== 'win32' && 'needs cmd.exe' }, async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'naso-plain-'));
+  try {
+    const script = path.join(root, 'plain.cmd');
+    await writeFile(script, '@exit /b 0\r\n');
+    const marker = path.join(root, 'injected.txt');
+    const res = await run(script, [`x" & echo pwned > "${marker}`, `& echo pwned > "${marker}"`, `%COMSPEC%`, '^&(x)|y'], { cwd: root });
+    assert.equal(res.ok, true, res.stderr);
+    assert.equal(await readFile(marker, 'utf8').catch(() => null), null, 'an argument ran as a command');
   } finally {
     await rm(root, { recursive: true, force: true });
   }

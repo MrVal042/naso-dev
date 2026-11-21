@@ -22,3 +22,7 @@ jobs:
       # The suite makes throwaway repositories and commits in them.
       - run: git config --global user.email "ci@example.invalid" && git config --global user.name "CI"
       - run: npm test
+      # The real npm and npx, started by NASO's own run(), from folders named "& (1)": on
+      # Windows these are npm.cmd and npx.cmd, the shims the cmd.exe escaping exists for.
+      - name: Pack the tarball and run it through the real npm and npx
+        run: node test/smoke/tarball.mjs
