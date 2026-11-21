@@ -120,13 +120,14 @@ CODEOWNERS line moved into it from Commit Standard and Boundaries, so each is sa
 | google/gson | 1,696 | 1,808 | 1,838 | +142 | — | 141 |
 | terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,426 | 1,456 | +142 | — | 141 |
 | naso-dev | 1,670 | 1,782 | 1,812 | +142 | — | 141 |
-| field repository, as generated | 1,576 | 1,691 | 2,119 | +543 | 398 (4 decisions, 1 env template) | 144 |
+| field repository, as generated | 1,576 | 1,691 | 2,115 | +539 | 394 (4 decisions, 1 env template) | 144 |
 
 Median 1,670 → 1,812 (+8.5%). requests gained its rules section and still grew by only 33
 tokens from Phase 1, because the CODEOWNERS line left Boundaries. The field repository has
-49 recorded decisions; four of them, cut to one sentence each, are most of its 398 tokens.
-That is the section's ceiling in practice, and whether those four are the right four is
-for the review pass to settle.
+48 accepted decisions. Only those whose decision states a constraint (never, always, must,
+only, do not, instead of, rather than, should not) are rules: 17 of the 48, and none of them
+a price or a plan. Four of those, cut to one sentence each, are most of its 394 tokens, which
+is the section's ceiling in practice.
 
 Every row has an empty NOW. (The cobra clone still held the 65-token sample NOW from
 Phase 1; it is left out here so the rows compare like for like.)

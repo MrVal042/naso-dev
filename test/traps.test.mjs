@@ -33,14 +33,14 @@ const decision = (n, title, status, why) =>
 test('an accepted decision is a rule, with its reason and its record; a proposed one is not', async () => {
   await withRepo(async ({ dir, git }) => {
     await seedProject(dir, git);
-    await put(dir, 'docs/decisions/0001-use-rest.md', decision('0001', 'Use REST for the public API', 'accepted', 'Partners already consume REST.'));
+    await put(dir, 'docs/decisions/0001-use-rest.md', decision('0001', 'Serve the public API only over REST', 'accepted', 'Partners already consume REST.'));
     await put(dir, 'docs/decisions/0002-try-graphql.md', decision('0002', 'Try GraphQL', 'proposed', 'Maybe faster.'));
     await git('add', '-A');
     await git('commit', '-qm', 'decisions');
 
     const traps = trapsOf(await setUp(dir));
     assert.ok(traps, 'the section is written');
-    const line = traps.find((entry) => /Use REST for the public API/.test(entry));
+    const line = traps.find((entry) => /Serve the public API only over REST/.test(entry));
     assert.ok(line, traps.join('\n'));
     assert.match(line, /Partners already consume REST/);
     assert.match(line, /`docs\/decisions\/0001-use-rest\.md`/);
@@ -69,13 +69,30 @@ test('decisions that say which paths they apply to come first, and each line kee
 test('a long decision is cut at a word with an ellipsis, and still cites the record that holds the rest', async () => {
   await withRepo(async ({ dir, git }) => {
     await seedProject(dir, git);
-    const long = `Use the shared client for ${'every single data call in the whole application '.repeat(8)}today`;
+    const long = `Always use the shared client for ${'every single data call in the whole application '.repeat(8)}today`;
     await put(dir, 'docs/decisions/0001-shared-client.md', decision('0001', long, 'accepted', `Because ${'reasons pile up across many teams '.repeat(8)}here`));
     await git('add', '-A');
     await git('commit', '-qm', 'decision');
     const [line] = trapsOf(await setUp(dir));
     assert.ok(line.length < 420, `${line.length} characters`);
-    assert.match(line, /^- Use the shared client for every[^.]*… Why: Because reasons[^.]*… \(`docs\/decisions\/0001-shared-client\.md`\)$/);
+    assert.match(line, /^- Always use the shared client for every[^.]*… Why: Because reasons[^.]*… \(`docs\/decisions\/0001-shared-client\.md`\)$/);
+  });
+});
+
+test('a decision that states no constraint is left out, however new or path-scoped', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'docs/decisions/0001-generated.md', decision('0001', 'Never edit generated files by hand', 'accepted', 'The next build overwrites them.'));
+    await put(
+      dir,
+      'docs/decisions/0002-plans.md',
+      '# 0002. Plans\n\n- Status: accepted\n- Date: 2026-11-02\n- Source: pricing review\n- Applies to: src/billing/\n\n## Decision\n\nThree plans cost 10, 20 and 30 dollars a month.\n\n## Why\n\nMarket.\n',
+    );
+    await git('add', '-A');
+    await git('commit', '-qm', 'decisions');
+    const traps = trapsOf(await setUp(dir));
+    assert.ok(traps.some((entry) => /Never edit generated files by hand/.test(entry)), traps.join('\n'));
+    assert.ok(!traps.some((entry) => /Three plans/.test(entry)), 'a product fact is not a trap');
   });
 });
 
@@ -150,6 +167,8 @@ test('CONTRIBUTING rules are quoted with their line, so the checker can test the
     const traps = trapsOf(await setUp(dir));
     assert.ok(traps.some((entry) => /`CONTRIBUTING\.md` line 5: “Keep one ticket per pull request\.”/.test(entry)), traps.join('\n'));
     assert.ok(traps.some((entry) => /`CONTRIBUTING\.md` line 7: “We squash merge every pull request\.”/.test(entry)), traps.join('\n'));
+    // A guide line rarely says why. NASO does not invent a reason for it.
+    assert.ok(traps.filter((entry) => /CONTRIBUTING\.md` line \d+:/.test(entry)).every((entry) => /”$/.test(entry)), traps.join('\n'));
     const branch = traps.find((entry) => /Name branches/.test(entry));
     assert.ok(branch, traps.join('\n'));
     assert.match(branch, /`CONTRIBUTING\.md` line 3/);
@@ -161,7 +180,7 @@ test('never more than ten rules, and never more than four of them decisions', as
     await seedProject(dir, git);
     for (let i = 1; i <= 8; i++) {
       const n = String(i).padStart(4, '0');
-      await put(dir, `docs/decisions/${n}-rule-${i}.md`, decision(n, `Rule number ${i}`, 'accepted', `Reason ${i}.`));
+      await put(dir, `docs/decisions/${n}-rule-${i}.md`, decision(n, `Only rule number ${i} applies`, 'accepted', `Reason ${i}.`));
     }
     await put(dir, '.env.example', 'A=\n');
     await put(dir, 'CODEOWNERS', '/src/ @core\n');
@@ -171,7 +190,7 @@ test('never more than ten rules, and never more than four of them decisions', as
     await git('commit', '-qm', 'everything');
     const traps = trapsOf(await setUp(dir));
     assert.ok(traps.length <= 10, `${traps.length} rules`);
-    assert.equal(traps.filter((entry) => /Rule number/.test(entry)).length, 4);
+    assert.equal(traps.filter((entry) => /rule number/.test(entry)).length, 4);
   });
 });
 

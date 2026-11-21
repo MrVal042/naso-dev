@@ -35,6 +35,14 @@ const ONE_PER = /\bone\s+(?:ticket|issue|story|task|change|feature|jira(?:\s+tic
 
 const CONTRIBUTING = ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'docs/CONTRIBUTING.md'];
 
+/**
+ * Words that make a decision a constraint on the work rather than a description of the
+ * product. "Change the schema only through migrations" is a trap; "Three plans cost 10, 20
+ * and 30 dollars" is a fact about the product that no code edit can get wrong. In the
+ * field 17 of 48 accepted decisions said one of these, and none of them was a price.
+ */
+const CONSTRAINT = /\b(?:never|always|must|only|do not|don't|instead of|rather than|should not|shouldn't)\b/i;
+
 async function read(cwd, rel) {
   return readFile(path.join(cwd, rel), 'utf8').catch(() => null);
 }
@@ -65,7 +73,7 @@ function firstSentence(text, max = 180) {
 async function decisionTraps(cwd) {
   const { records } = await readDecisions(cwd).catch(() => ({ records: [] }));
   return records
-    .filter((record) => record.status === 'accepted' && record.decision)
+    .filter((record) => record.status === 'accepted' && record.decision && CONSTRAINT.test(firstSentence(record.decision, Infinity)))
     .sort((a, b) => Number(b.applies.length > 0) - Number(a.applies.length > 0) || b.id.localeCompare(a.id))
     .slice(0, MAX_DECISIONS)
     .map((record) => {
@@ -188,7 +196,9 @@ async function contributingTraps(cwd, files) {
   }
   return out
     .sort((a, b) => a.line - b.line)
-    .map((rule) => `\`${rule.file}\` line ${rule.line}: “${rule.text}” Why: it is the team's own rule, and review holds pull requests to it.`);
+    // Quoted as written, with no reason added: a guide line rarely gives one, and a reason
+    // NASO made up would be the one sentence in the block nobody wrote.
+    .map((rule) => `\`${rule.file}\` line ${rule.line}: “${rule.text}”`);
 }
 
 /**

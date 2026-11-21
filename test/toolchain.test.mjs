@@ -183,9 +183,9 @@ test('setup derives the toolchain facts agents had to add by hand, each cited, a
     assert.match(checklist, /line 5: “No secret in an EXPO_PUBLIC_ variable”/);
     // CONTRIBUTING's merge rules are quoted once, with their reason, among the traps.
     const rules = sectionOf(text, 'Rules That Are Easy To Get Wrong');
-    assert.match(rules, /`CONTRIBUTING\.md` line 8: “Revert messages are accepted as git writes them\.” Why:/);
-    assert.match(rules, /`CONTRIBUTING\.md` line 12: “Merge requests are squashed when they merge\.” Why:/);
-    assert.match(rules, /`CONTRIBUTING\.md` line 13: “Code owners may self-approve documentation changes\.” Why:/);
+    assert.match(rules, /`CONTRIBUTING\.md` line 8: “Revert messages are accepted as git writes them\.”$/m);
+    assert.match(rules, /`CONTRIBUTING\.md` line 12: “Merge requests are squashed when they merge\.”$/m);
+    assert.match(rules, /`CONTRIBUTING\.md` line 13: “Code owners may self-approve documentation changes\.”$/m);
     assert.doesNotMatch(sectionOf(text, 'Commit Standard'), /line 12/, 'said once, not twice');
     const check = await script('briefing');
     assert.doesNotMatch(check.stdout, /WRONG|MISSING|UNCOVERED/, check.stdout);
