@@ -301,6 +301,9 @@ export function topLevelEntries(files) {
 
     const [head, ...rest] = segments;
     if (head === '.git' || head === LOCK_FILENAME) continue;
+    // Copilot's instruction files are a briefing, like AGENTS.md, not part of the structure:
+    // a pointer `naso-dev agents copilot` writes must not make `.github/` an area of its own.
+    if (/^\.github\/(?:copilot-instructions\.md$|instructions\/)/.test(file)) continue;
 
     const isDir = rest.length > 0;
     // A dot-*directory* is almost always tool state (`.git`, `.expo`, `.idea`) and

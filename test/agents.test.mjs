@@ -149,3 +149,21 @@ for (const fixture of FIXTURES.filter((entry) => entry.git !== 'none')) {
     });
   });
 }
+
+test('a Copilot pointer committed where there was no .github/ does not make .github/ an area', async () => {
+  const { topLevelEntries } = await import('../tooling/scan.mjs');
+  const names = (files) => topLevelEntries(files).filter((entry) => entry.isDir).map((entry) => entry.name);
+  assert.deepEqual(names(['.github/copilot-instructions.md', '.github/instructions/go.instructions.md', 'src/a.js']), ['src']);
+  assert.deepEqual(names(['.github/copilot-instructions.md', '.github/workflows/ci.yml', 'src/a.js']), ['.github', 'src']);
+
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await naso([dir, '--yes', '--no-hook', '--track'], dir);
+    await naso(['agents', 'copilot', dir, '--track'], dir);
+    await git('add', '-A');
+    await git('commit', '-qm', 'pointer');
+    const res = await naso(['briefing', dir], dir);
+    assert.equal(res.code, 0, res.stdout);
+    assert.doesNotMatch(res.stdout, /UNCOVERED/);
+  });
+});
