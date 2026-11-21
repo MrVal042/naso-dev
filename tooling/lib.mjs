@@ -65,27 +65,53 @@ function isFileSync(candidate) {
   }
 }
 
+/** What cmd.exe reads as syntax outside quotes. Escaped with ^, quotes included. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
 /**
- * One argument for cmd.exe: in double quotes, with each quote doubled. Inside quotes
- * cmd.exe treats & | < > ( ) as text. It still expands %NAME% when NAME is set; nothing
- * NASO passes is shaped like that.
+ * The program part of a cmd.exe line: every metacharacter escaped with ^, no quotes. A
+ * folder called "a&b" would otherwise end the command at the &.
  */
-export function windowsQuote(arg) {
-  return `"${String(arg).replace(/"/g, '""')}"`;
+export function escapeCommand(file) {
+  return String(file).replace(CMD_META, '^$1');
 }
 
 /**
- * How to start `cmd` on this platform: `{ cmd, args, shell }` for spawn.
+ * One argument for a cmd.exe line, escaped the way cross-spawn does (https://qntm.org/cmd).
+ *
+ * First quoted for the program's own parser (MSVCRT rules): backslashes before a quote or
+ * at the end are doubled, and an inner quote becomes \". Then every metacharacter, the
+ * quotes too, gets a ^, so cmd.exe reads none of it as syntax: no &, |, < or > can start a
+ * command and no %NAME% is expanded. Escaped quotes also mean cmd.exe never enters a
+ * quoted state where ^ would stop working.
+ *
+ * `twice` escapes again, for a .cmd or .bat that passes %* on to another program: npm,
+ * npx, pnpm, yarn and bun are all such shims, and cmd.exe parses the line once to start
+ * the shim and again when the shim runs its own line.
+ */
+export function escapeArgument(arg, twice = false) {
+  let quoted = String(arg)
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\*)$/, '$1$1');
+  quoted = `"${quoted}"`.replace(CMD_META, '^$1');
+  return twice ? quoted.replace(CMD_META, '^$1') : quoted;
+}
+
+/**
+ * How to start `cmd` on this platform: `{ cmd, args, shell, verbatim }` for spawn.
  *
  * Off Windows it is the command as given, with no shell. On Windows the command is looked
- * up on Path in PATHEXT order, as cmd.exe would. An .exe runs directly. A .cmd or .bat (npm,
- * npx, pnpm, yarn, bun) runs through the shell as one quoted line, because Node refuses
- * to spawn one without a shell (EINVAL since 18.20.2 and 20.12.2), and `shell: true` with
- * unquoted arguments would split a path with a space in it. A command not found is left
- * as it is, for spawn to report the way it always has.
+ * up on Path in PATHEXT order, as cmd.exe would. An .exe runs directly and nothing reads
+ * its arguments but the program. A .cmd or .bat (npm, npx, pnpm, yarn, bun) cannot: Node
+ * 18.20.2, 20.12.2 and 21.7.3 and later refuse to spawn one without a shell (EINVAL), after
+ * CVE-2024-27980. Quoting alone is not enough there, because cmd.exe still reads %, ^, &,
+ * |, <, >, ( ) and quotes as syntax. So NASO runs `%ComSpec% /d /s /c "<line>"` itself,
+ * with every part escaped (escapeCommand, escapeArgument) and `windowsVerbatimArguments`
+ * so Node adds no quoting of its own. /d skips AutoRun commands from the registry. A
+ * command not found is left as it is, for spawn to report the way it always has.
  */
 export function spawnPlan(cmd, args = [], { platform = process.platform, env = process.env, isFile = isFileSync } = {}) {
-  const asIs = { cmd, args, shell: false };
+  const asIs = { cmd, args, shell: false, verbatim: false };
   if (platform !== 'win32') return asIs;
   const win = path.win32;
   const exts = String(envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
@@ -97,9 +123,10 @@ export function spawnPlan(cmd, args = [], { platform = process.platform, env = p
       const candidate = dir ? win.join(dir, name) : name;
       if (!isFile(candidate)) continue;
       if (/\.(cmd|bat)$/i.test(candidate)) {
-        return { cmd: [candidate, ...args].map(windowsQuote).join(' '), args: [], shell: true };
+        const line = [escapeCommand(candidate), ...args.map((arg) => escapeArgument(arg, true))].join(' ');
+        return { cmd: envValue(env, 'COMSPEC') || 'cmd.exe', args: ['/d', '/s', '/c', `"${line}"`], shell: false, verbatim: true };
       }
-      return { cmd: candidate, args, shell: false };
+      return { cmd: candidate, args, shell: false, verbatim: false };
     }
   }
   return asIs;
@@ -114,6 +141,7 @@ export function run(cmd, args = [], opts = {}) {
         cwd: opts.cwd ?? process.cwd(),
         stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
         shell: plan.shell,
+        windowsVerbatimArguments: plan.verbatim,
         env: process.env,
       });
     } catch (err) {
