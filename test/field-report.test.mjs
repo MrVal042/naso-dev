@@ -185,3 +185,21 @@ test('the hook runs from a linked worktree of a repository that keeps .naso/ loc
   });
 });
 
+
+test('a block written where package.json pins an older naso-dev names the version that has each command', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    const pkg = JSON.parse(await read(dir, 'package.json'));
+    pkg.devDependencies = { ...(pkg.devDependencies ?? {}), 'naso-dev': '1.5.3' };
+    await put(dir, 'package.json', JSON.stringify(pkg, null, 2));
+    await git('add', '-A');
+    await git('commit', '-qm', 'pin');
+    await createBriefing(dir);
+    const block = await readBriefing(dir);
+    const { toolVersion } = await import('../tooling/lib.mjs');
+    const version = await toolVersion();
+    assert.ok(block.includes(`naso-dev@${version} handoff`), block);
+    assert.ok(block.includes(`naso-dev@${version} lesson`), block);
+    assert.doesNotMatch(block, /npx naso-dev handoff/);
+  });
+});

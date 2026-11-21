@@ -21,6 +21,7 @@ import {
   detectPackageManager,
   exactDevInstallText,
   pinAdvice,
+  COMMAND_SINCE,
 } from './lib.mjs';
 import { DECISIONS_LEAD, decisionsLead, readDecisions } from './decisions.mjs';
 import {
@@ -67,8 +68,7 @@ const EXTENSIONLESS_FILES = /^(?:Makefile|Dockerfile|Containerfile|LICEN[CS]E|NO
 
 const MARKERS = ['TODO(fill)', 'TODO(describe)'];
 
-/** Commands a block may tell agents to run, and the naso-dev version that added each. */
-export const COMMAND_SINCE = { handoff: '1.6.0', lesson: '1.6.0', lessons: '1.6.0', claude: '1.6.0', stats: '1.6.0', agents: '2.0.0', workspace: '2.0.0' };
+export { COMMAND_SINCE } from './lib.mjs';
 
 /** A version written as a template, `vX.Y.Z` or `x.y`: a placeholder, so never a path on disk. */
 const VERSION_TEMPLATE = /(?:^|[/.-])v?[Xx]\.[Yy](?:\.[Zz])?(?:$|[/.-])/;
