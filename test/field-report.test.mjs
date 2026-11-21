@@ -203,3 +203,32 @@ test('a block written where package.json pins an older naso-dev names the versio
     assert.doesNotMatch(block, /npx naso-dev handoff/);
   });
 });
+
+test('a rule CLAUDE.md already states is not drafted into the block again', async () => {
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'CONTRIBUTING.md', '# Contributing\n\nOne ticket per merge request, always, so each review stays small.\n\nBranches are named `feature/<short-name>`.\n');
+    const files = ['CONTRIBUTING.md'];
+    const before = (await deriveTraps(dir, files)).map(String);
+    assert.ok(before.some((trap) => /One ticket per merge request/.test(trap)), before.join('\n'));
+    assert.ok(before.some((trap) => /feature\/<short-name>/.test(trap)));
+
+    await put(dir, 'CLAUDE.md', '# Rules\n\n- Keep each review small: always one ticket per merge request.\n- Name branches `feature/<short-name>`.\n');
+    const after = (await deriveTraps(dir, files)).map(String);
+    assert.ok(!after.some((trap) => /One ticket per merge request/.test(trap)), after.join('\n'));
+    assert.ok(!after.some((trap) => /feature\/<short-name>/.test(trap)), after.join('\n'));
+  });
+});
+
+test('a decisions README with a list of its own is not given a second one', async () => {
+  const { syncDecisionIndex } = await import('../tooling/decisions.mjs');
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'docs/decisions/0007-use-postgres.md', '# 7. Use Postgres\n\n## Status\n\nAccepted\n\n## Decision\n\nPostgres.\n');
+    await put(dir, 'docs/decisions/0008-use-redis.md', '# 8. Use Redis\n\n## Status\n\nAccepted\n\n## Decision\n\nRedis.\n');
+    const own = '# Decisions\n\n- [0007](0007-use-postgres.md) Use Postgres\n';
+    await put(dir, 'docs/decisions/README.md', own);
+    const result = await syncDecisionIndex(dir);
+    assert.equal(result.outcome, 'own-list');
+    assert.deepEqual(result.unlisted.map((record) => record.id), ['0008']);
+    assert.equal(await read(dir, 'docs/decisions/README.md'), own);
+  });
+});
