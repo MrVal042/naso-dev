@@ -590,6 +590,12 @@ const BOOLEAN_FLAGS = new Set([
   'discard-edits',
   'no-ignore-files',
   'json',
+  'deny',
+  'hooks',
+  'skills',
+  'claude-deny',
+  'claude-hooks',
+  'claude-skills',
 ]);
 
 /** Single-letter spellings, mapped to the long flag they stand for. */

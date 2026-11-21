@@ -10,7 +10,7 @@
 // hundred thousand files as in one of ten, and it needs neither git nor a manifest.
 
 import path from 'node:path';
-import { readFile, realpath } from 'node:fs/promises';
+import { readFile, realpath, readdir } from 'node:fs/promises';
 import { parseArgs, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, toolVersion } from './lib.mjs';
 import { locateHandoff, NOW_START, NOW_END } from './handoff.mjs';
 
@@ -248,6 +248,17 @@ export async function measureSessionLoad(targetDir) {
         record(shown, text, { reason: 'the handoff, with no NOW markers, so all of it', part: 'whole' });
       }
     }
+  }
+
+  // Project skills: Claude Code puts each one's description in context at session start and
+  // reads the body only when the skill is used, so the front matter is what counts.
+  const skillsDir = path.join(root, '.claude', 'skills');
+  for (const entry of (await readdir(skillsDir, { withFileTypes: true }).catch(() => [])).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory()) continue;
+    const rel = path.join('.claude', 'skills', entry.name, 'SKILL.md');
+    const text = await readText(path.join(root, rel));
+    const front = text === null ? null : /^---\r?\n[\s\S]*?\r?\n---\r?\n/.exec(text)?.[0];
+    if (front) record(rel, front, { reason: 'Claude Code lists the skill by its description', part: 'description' });
   }
 
   const sections = files

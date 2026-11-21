@@ -37,6 +37,7 @@ import { detectStack } from './stack.mjs';
 import { parseIgnorePatterns, blockEdited as isBlockEdited } from './scan.mjs';
 import { NASO_DIR, isVendored, vendoredVersion } from './vendor.mjs';
 import { inspect, install, displayPlan, displayOverview, devDependencyPlan, pinsExactVersions, HOOK_ACTIONS } from './setup.mjs';
+import { codeownersOwners } from './claude.mjs';
 import { colorEnabled, createStyle } from './ui.mjs';
 import { confirm, select, isCancel, note, outro } from './prompt.mjs';
 
@@ -293,7 +294,42 @@ async function ask(style, options, context, io = {}) {
     saveDev = record;
   }
 
-  return { track, noHook, force, hookAction, saveDev };
+  // Claude Code extras, last, and only from the real flow (it passes `claude`). Every
+  // default is No: they write into .claude/, which is the person's, and NASO works without them.
+  const extras = {};
+  if (context.claude) {
+    const { owners = [], scope = [] } = context.claude;
+    if (!options.claudeDeny && (owners.length > 0 || scope.length > 0)) {
+      const choice = await select({
+        message: 'Claude Code: deny edits to paths that are not yours? (.claude/settings.local.json, this machine only)',
+        initialValue: 'none',
+        options: [
+          { value: 'none', label: 'No', hint: 'Claude Code may edit any path' },
+          ...owners.slice(0, 8).map((owner) => ({ value: `owner:${owner}`, label: `I am ${owner}`, hint: 'deny what CODEOWNERS gives to others' })),
+          ...(scope.length > 0 ? [{ value: 'scope', label: 'Use NASO_SCOPE', hint: scope.join(', ') }] : []),
+        ],
+        style,
+        ...io,
+      });
+      if (isCancel(choice)) return null;
+      if (choice !== 'none') {
+        extras.claudeDeny = true;
+        extras.owners = choice.startsWith('owner:') ? [choice.slice(6)] : [];
+      }
+    }
+    if (!options.claudeHooks) {
+      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: false, style, ...io });
+      if (isCancel(hooks)) return null;
+      extras.claudeHooks = hooks;
+    }
+    if (!options.claudeSkills) {
+      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: false, style, ...io });
+      if (isCancel(skills)) return null;
+      extras.claudeSkills = skills;
+    }
+  }
+
+  return { track, noHook, force, hookAction, saveDev, ...extras };
 }
 
 /**
@@ -431,6 +467,10 @@ Other commands:
     hookAction: values.get('hook-action') ?? null,
     saveDev: flags.has('save-dev'),
     discardEdits: flags.has('discard-edits'),
+    claudeDeny: flags.has('claude-deny'),
+    claudeHooks: flags.has('claude-hooks'),
+    claudeSkills: flags.has('claude-skills'),
+    owners: listOption(lists, 'owners'),
     noIgnoreFiles: flags.has('no-ignore-files'),
   };
 
@@ -520,7 +560,8 @@ Other commands:
   if (!options.yes) {
     const pkg = await readJSONFile(path.join(cwd, 'package.json'));
     const devDependency = devDependencyPlan(pkg, (await detectPackageManager(cwd, pkg)).name, version, { exact: await pinsExactVersions(cwd, pkg) });
-    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency });
+    const claude = { owners: await codeownersOwners(cwd).catch(() => []), scope: String(process.env.NASO_SCOPE ?? '').split(',').map((part) => part.trim()).filter(Boolean) };
+    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency, claude });
     if (answered === null) {
       prompts.done(style.warn('Cancelled. Nothing was written.'));
       return;

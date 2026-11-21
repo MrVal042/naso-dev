@@ -131,3 +131,18 @@ is the section's ceiling in practice.
 
 Every row has an empty NOW. (The cobra clone still held the 65-token sample NOW from
 Phase 1; it is left out here so the rows compare like for like.)
+
+## Phase 3: Claude Code extras (1.6.0, unreleased)
+
+Every extra is opt-in, so a default setup loads exactly what Phase 2 loads: naso-dev stays at
+1,812. With them turned on (naso-dev, same commit):
+
+| What | Tokens at session start |
+| --- | ---: |
+| Default setup, no extras | 1,812 |
+| `--skills`: four skill descriptions (naso-decide 52, naso-handoff 53, naso-pre-pr 42, naso-sweep 42) | +189 |
+| `--hooks`: the SessionStart output beyond the NOW section already counted (a header and one line about the briefing) | about +25 |
+| `--deny` | 0: deny rules are settings, not context |
+
+`stats` now counts each skill's front matter. The hook output is not a file, so it is
+estimated from its length (102 characters with an empty NOW).

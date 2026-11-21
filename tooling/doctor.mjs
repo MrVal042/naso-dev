@@ -27,6 +27,7 @@ import {
   NASO_END,
 } from './briefing.mjs';
 import { readHook, isNasoHook, findArtifacts, CLAUDE_FILE, claudeLoadsBriefing } from './install.mjs';
+import { denyDrift, hooksHealth } from './claude.mjs';
 import { NASO_DIR, readConfig, configuredExclusions, configPath, vendoredVersion, setupVersionOf } from './vendor.mjs';
 
 const OK = 'OK';
@@ -193,6 +194,30 @@ Support: ${SUPPORT_EMAIL}`);
     printRow('Claude Code link', OK, 'CLAUDE.md loads AGENTS.md');
   } else {
     printRow('Claude Code link', WARN, 'CLAUDE.md does not load AGENTS.md — add `@AGENTS.md` to it');
+  }
+
+  const hooks = await hooksHealth(cwd).catch(() => null);
+  if (hooks) {
+    printRow('Claude hooks', hooks.ok ? OK : WARN, hooks.ok
+      ? `SessionStart and Stop in ${hooks.file} run .naso/tooling/session-hook.mjs`
+      : `${hooks.file} runs .naso/tooling/session-hook.mjs, which is missing; every session gets a hook error. Run: ${nasoCommand()} refresh`);
+  }
+
+  // Deny rules drift as CODEOWNERS changes. Only reported once they were set up: a
+  // repository that never asked for them has nothing to drift from.
+  const drift = await denyDrift(cwd).catch(() => null);
+  if (drift) {
+    if (drift.invalid) {
+      printRow('Claude deny rules', WARN, `${drift.file} is not valid JSON; Claude Code may not read it`);
+    } else if (drift.ok) {
+      printRow('Claude deny rules', OK, `${drift.expected.length} rule${drift.expected.length === 1 ? '' : 's'} match ${drift.source === 'codeowners' ? 'CODEOWNERS' : 'NASO_SCOPE'}`);
+    } else {
+      const parts = [
+        ...(drift.missing.length > 0 ? [`${drift.missing.length} path${drift.missing.length === 1 ? '' : 's'} outside your ownership not denied`] : []),
+        ...(drift.stale.length > 0 ? [`${drift.stale.length} rule${drift.stale.length === 1 ? '' : 's'} deny what is yours now`] : []),
+      ];
+      printRow('Claude deny rules', WARN, `${parts.join('; ')}. Run: ${nasoCommand()} claude --deny`);
+    }
   }
 
   const artifacts = await findArtifacts(cwd);

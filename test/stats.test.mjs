@@ -142,6 +142,18 @@ test('CRLF files count the same lines as LF files', async () => {
   });
 });
 
+test('a project skill counts by its front matter only: Claude Code loads the description, not the body', async () => {
+  await withRepo(async ({ dir }) => {
+    const front = '---\nname: naso-sweep\ndescription: Catch up since the last session.\n---\n';
+    await put(dir, '.claude/skills/naso-sweep/SKILL.md', `${front}\n# Body\n\n${'long instructions\n'.repeat(100)}`);
+    const load = await measureSessionLoad(dir);
+    const skill = load.files.find((file) => file.path === '.claude/skills/naso-sweep/SKILL.md');
+    assert.ok(skill, JSON.stringify(load.files));
+    assert.equal(skill.part, 'description');
+    assert.equal(skill.tokens, tokensOf(front));
+  });
+});
+
 test('stats prints the table, the total and the largest sections, and --json prints the same numbers', async () => {
   await withRepo(async ({ dir }) => {
     await put(dir, 'AGENTS.md', `## Commands\n\n${'line\n'.repeat(30)}`);

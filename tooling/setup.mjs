@@ -94,6 +94,7 @@ import {
 import { reviewPrompt } from './review.mjs';
 import { indexFileOf } from './decisions.mjs';
 import { locateHandoff, ensureHandoff, renderHandoff } from './handoff.mjs';
+import { planClaude } from './claude.mjs';
 
 /** Greedy word wrap, for the explanatory paragraphs in the plan. */
 const wrap = (text, width = 74) => {
@@ -376,7 +377,7 @@ const TRACKED_AGENTS_NOTE =
  * The scan is the expensive part and it is what both a rejection and an accept
  * are decided on, so it is done up front and reused for the whole flow.
  */
-export async function inspect(cwd, { track, noHook, exclude, force = false, hookAction = null, saveDev = false, discardEdits = false, noIgnoreFiles = false }) {
+export async function inspect(cwd, { track, noHook, exclude, force = false, hookAction = null, saveDev = false, discardEdits = false, noIgnoreFiles = false, claudeDeny = false, claudeHooks = false, claudeSkills = false, owners = [] }) {
   const config = await readConfig(cwd);
 
   // Saved exclusions survive the run, and a --exclude flag adds to them. The union is
@@ -666,7 +667,17 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
     writes.push({ path: LOCKFILE_OF[devDependency.pm] ?? 'package-lock.json', change: 'by-pm', lines: 0, note: `by ${devDependency.pm}, with node_modules/` });
   }
 
-  return { facts, artifacts, hook, hookDecision, version, plans, writes, excluded, hasAgents, hasBlock, blockEdited: edited, force, localExcludes, claude, devDependency, recordsDev, track, ignoreFiles: [prettierIgnore, dockerIgnore, eslintIgnore].filter((plan) => plan && !plan.manual) };
+  // Claude Code extras, only those asked for. Computed now so the plan lists their files.
+  const claudePlan = claudeDeny || claudeHooks || claudeSkills
+    ? await planClaude(cwd, { track, deny: claudeDeny, owners, hooks: claudeHooks, skills: claudeSkills, vendoring: true })
+    : null;
+  if (claudePlan) {
+    plans.push(...claudePlan.plans);
+    writes.push(...claudePlan.writes);
+    for (const error of claudePlan.errors) plans.push({ target: '.claude/', verb: 'Leave', detail: error });
+  }
+
+  return { facts, artifacts, hook, hookDecision, version, plans, writes, excluded, hasAgents, hasBlock, blockEdited: edited, force, localExcludes, claude, claudePlan, devDependency, recordsDev, track, ignoreFiles: [prettierIgnore, dockerIgnore, eslintIgnore].filter((plan) => plan && !plan.manual) };
 }
 
 /**
@@ -901,6 +912,13 @@ export async function install(cwd, { track, noHook, force, discardEdits = false,
     exclude: state.excluded,
   });
   console.log(ok(`${NASO_DIR}/config.json: wrote the settings this run used`));
+
+  // After the config: the extras record what they wrote in it, for doctor.
+  if (state.claudePlan) {
+    await state.claudePlan.apply();
+    for (const line of state.claudePlan.report.filter((entry) => !entry.startsWith('  '))) console.log(ok(`Claude Code ${line.charAt(0).toLowerCase()}${line.slice(1)}`));
+    for (const error of state.claudePlan.errors) console.log(no(error));
+  }
 
   for (const { name, file, text, next } of state.ignoreFiles ?? []) {
     await writeFile(file, next ?? `${text}${ignoreAppend(text)}`, 'utf8');
