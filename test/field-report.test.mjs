@@ -132,3 +132,34 @@ test('review defers to a repository rule against re-proposing documented decisio
     assert.match(prompt, /repeats a linked file or CLAUDE\.md/);
   });
 });
+
+test('a branch exception the guide allows passes, and the rule names it', async () => {
+  const { documentedBranchPattern } = await import('../tooling/lib.mjs');
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'CONTRIBUTING.md', '# Branches\n\nName branches `<type>/<JIRA-KEY>-<short-name>`, except `hotfix/vX.Y.Z` for hotfixes.\n');
+    const rule = await documentedBranchPattern(dir);
+    assert.deepEqual(rule.exceptions, ['hotfix/vX.Y.Z']);
+    assert.ok(rule.regex.test('hotfix/v1.4.2'));
+    assert.ok(rule.regex.test('feat/SCRUM-9-login'));
+    assert.ok(!rule.regex.test('hotfix/urgent'));
+    const traps = (await deriveTraps(dir, ['CONTRIBUTING.md'])).map(String);
+    assert.ok(traps.some((trap) => /or `hotfix\/vX\.Y\.Z` \(/.test(trap)), traps.join('\n'));
+  });
+});
+
+test('a handoff the repository keeps is the one Read First names, and setup writes no second one', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    await put(dir, 'docs/HANDOFF.md', '# Handoff\n\nWhere things stand.\n');
+    await git('add', '-A');
+    await git('commit', '-qm', 'handoff');
+    const res = await naso([dir, '--yes', '--no-hook', '--track'], dir);
+    assert.equal(res.code, 0, res.stdout + res.stderr);
+    const block = await readBriefing(dir);
+    assert.match(block, /1\. The handoff this repository keeps, `docs\/HANDOFF\.md`\./);
+    assert.match(block, /update `docs\/HANDOFF\.md` the way it is kept/);
+    assert.doesNotMatch(block, /handoff set/);
+    const { pathExists } = await import('../tooling/lib.mjs');
+    assert.equal(await pathExists(path.join(dir, '.naso', 'HANDOFF.md')), false);
+  });
+});

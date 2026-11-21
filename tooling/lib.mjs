@@ -248,18 +248,49 @@ export async function documentedBranchPattern(cwd) {
   for (const source of CONTRIBUTING_FILES) {
     const text = await readFile(path.join(cwd, source), 'utf8').catch(() => null);
     if (text === null) continue;
+    const lines = text.split('\n');
     let heading = '';
-    for (const line of text.split('\n')) {
+    for (const [index, line] of lines.entries()) {
       if (/^#+\s/.test(line)) heading = line;
       if (!/branch/i.test(line) && !/branch/i.test(heading)) continue;
       for (const match of line.matchAll(/`([^`\s]*<[^`\s]+>[^`\s]*)`/g)) {
         const template = match[1];
         if (!template.includes('/')) continue;
-        return { source, text: template, regex: branchTemplateRegex(template) };
+        const exceptions = branchExceptions(lines, index, template);
+        const main = branchTemplateRegex(template);
+        const regex = exceptions.length === 0 ? main : new RegExp(`(?:${[main, ...exceptions.map((entry) => entry.regex)].map((re) => re.source).join(')|(?:')})`);
+        return { source, text: template, regex, exceptions: exceptions.map((entry) => entry.text) };
       }
     }
   }
   return null;
+}
+
+/** `hotfix/vX.Y.Z`: a branch written with a version template rather than `<placeholders>`. */
+const VERSION_BRANCH = /^[\w.-]+\/[\w.-]*?[vV]?X\.Y(?:\.Z)?[\w.-]*$/;
+
+/**
+ * The other branch templates the same rule allows: on the template's line, and on the lines
+ * after it up to the next heading or blank line, a backticked branch with placeholders or a
+ * version template (`hotfix/vX.Y.Z`). Without them the gate warned on every hotfix branch
+ * the guide itself allowed.
+ */
+function branchExceptions(lines, index, template) {
+  const found = [];
+  for (let i = index; i < lines.length; i++) {
+    const line = lines[i];
+    if (i > index && (/^#+\s/.test(line) || line.trim() === '')) break;
+    for (const match of line.matchAll(/`([^`\s]+)`/g)) {
+      const token = match[1];
+      if (token === template || !token.includes('/') || found.some((entry) => entry.text === token)) continue;
+      if (/<[^>]+>/.test(token)) found.push({ text: token, regex: branchTemplateRegex(token) });
+      else if (VERSION_BRANCH.test(token)) {
+        const pattern = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/X\\\.Y(\\\.Z)?/, (_, z) => `\\d+\\.\\d+${z ? '\\.\\d+' : ''}`);
+        found.push({ text: token, regex: new RegExp(`^${pattern}$`) });
+      }
+    }
+  }
+  return found;
 }
 
 // ---------------------------------------------------------------------------

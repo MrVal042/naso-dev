@@ -12,7 +12,7 @@ task needs it.
 | [expo-app/](expo-app/AGENTS.md) | 804 | [conventions.md](expo-app/.naso/guides/conventions.md), [decisions.md](expo-app/.naso/guides/decisions.md), [workflow.md](expo-app/.naso/guides/workflow.md) |
 | [go-cli/](go-cli/AGENTS.md) | 733 | [conventions.md](go-cli/.naso/guides/conventions.md), [decisions.md](go-cli/.naso/guides/decisions.md), [internal.md](go-cli/.naso/guides/internal.md), [workflow.md](go-cli/.naso/guides/workflow.md) |
 | [monorepo/](monorepo/AGENTS.md) | 918 | [conventions.md](monorepo/.naso/guides/conventions.md), [decisions.md](monorepo/.naso/guides/decisions.md), [workflow.md](monorepo/.naso/guides/workflow.md) |
-| [nestjs-api/](nestjs-api/AGENTS.md) | 966 | [conventions.md](nestjs-api/.naso/guides/conventions.md), [decisions.md](nestjs-api/.naso/guides/decisions.md), [workflow.md](nestjs-api/.naso/guides/workflow.md) |
+| [nestjs-api/](nestjs-api/AGENTS.md) | 972 | [conventions.md](nestjs-api/.naso/guides/conventions.md), [decisions.md](nestjs-api/.naso/guides/decisions.md), [workflow.md](nestjs-api/.naso/guides/workflow.md) |
 | [python-service/](python-service/AGENTS.md) | 749 | [conventions.md](python-service/.naso/guides/conventions.md), [decisions.md](python-service/.naso/guides/decisions.md), [workflow.md](python-service/.naso/guides/workflow.md) |
 | [rust-library/](rust-library/AGENTS.md) | 693 | [decisions.md](rust-library/.naso/guides/decisions.md), [workflow.md](rust-library/.naso/guides/workflow.md) |
 | [terraform-module/](terraform-module/AGENTS.md) | 644 | [decisions.md](terraform-module/.naso/guides/decisions.md), [workflow.md](terraform-module/.naso/guides/workflow.md) |

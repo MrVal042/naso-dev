@@ -178,7 +178,8 @@ async function branchTrap(cwd) {
   const lines = ((await read(cwd, pattern.source)) ?? '').split('\n');
   const at = lines.findIndex((line) => line.includes(pattern.text));
   const where = at === -1 ? `\`${pattern.source}\`` : `\`${pattern.source}\` line ${at + 1}`;
-  return [`Name branches \`${pattern.text}\` (${where}); NASO's pre-commit hook warns on any other.`];
+  const except = pattern.exceptions?.length ? `, or ${pattern.exceptions.map((text) => `\`${text}\``).join(', ')}` : '';
+  return [`Name branches \`${pattern.text}\`${except} (${where}); NASO's pre-commit hook warns on any other.`];
 }
 
 /** CONTRIBUTING's own words: one ticket per pull request, the merge mode, who may approve, exceptions. */

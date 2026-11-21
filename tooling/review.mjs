@@ -326,7 +326,7 @@ function stateLines(state, cmd, here) {
     lines.push(
       `- You are on branch ${state.branch}.` +
         (rule
-          ? ` \`${rule.source}\` says branches follow \`${rule.text}\`${rule.regex.test(state.branch) ? ', and this one does' : ', and this one does not'}.`
+          ? ` \`${rule.source}\` says branches follow \`${rule.text}\`${rule.exceptions?.length ? ` (or ${rule.exceptions.map((text) => `\`${text}\``).join(', ')})` : ''}${rule.regex.test(state.branch) ? ', and this one does' : ', and this one does not'}.`
           : ' No branch rule is written down that NASO could read; look for one before planning the commit.'),
     );
   }

@@ -814,9 +814,17 @@ function lessonsLine(facts) {
 export function renderReadFirst(facts) {
   const handoff = facts.handoff;
   const decisions = facts.decisions ?? {};
-  const handoffLine = handoff && handoff.where !== 'git'
-    ? `1. The handoff's NOW section, in \`${handoff.shown}\`.`
-    : `1. The handoff's NOW section: \`${nasoCommand()} handoff\` prints it (kept in the git directory, shared by every worktree).`;
+  const team = facts.teamHandoff ?? null;
+  const handoffLine = team
+    ? `1. The handoff this repository keeps, \`${team}\`.`
+    : handoff && handoff.where !== 'git'
+      ? `1. The handoff's NOW section, in \`${handoff.shown}\`.`
+      : `1. The handoff's NOW section: \`${nasoCommand()} handoff\` prints it (kept in the git directory, shared by every worktree).`;
+  // A handoff of the repository's own is kept its own way; NASO's commands would add their
+  // sections to it, so the block says to update it, not how.
+  const keep = team
+    ? `When a PR opens or merges, when a decision is made, and before you stop: update \`${team}\` the way it is kept.`
+    : `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`.`;
   const decisionsLine = decisions.indexExists
     ? `3. The decisions in \`${decisions.dir}/README.md\` that apply to the paths you will change.`
     : `3. The decisions that apply to the paths you will change: \`${guideRel('decisions')}\` says where they are kept.`;
@@ -827,7 +835,7 @@ export function renderReadFirst(facts) {
     `2. This block, then the guide ${TOUCH_HEADING} names for the work you are about to do.`,
     decisionsLine,
     '',
-    `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`. ${lessonsLine(facts)}`,
+    `${keep} ${lessonsLine(facts)}`,
   ].join('\n');
 }
 

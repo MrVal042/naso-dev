@@ -91,6 +91,24 @@ export async function repoContext(cwd) {
   return { root, config, common };
 }
 
+/** Where a repository keeps a handoff of its own, before NASO; first match wins. */
+export const TEAM_HANDOFFS = ['HANDOFF.md', 'docs/HANDOFF.md', 'docs/handoff.md', '.claude/notes/HANDOFF.md', '.claude/HANDOFF.md', 'notes/HANDOFF.md'];
+
+/**
+ * The repository's own handoff, as a path relative to its root, or null. A file in NASO's
+ * format (it has the NOW markers) is NASO's, wherever it is. With one of its own, the
+ * briefing points there instead of to a second, empty handoff in .naso/: one field review
+ * found both, and the agent was told to read the empty one.
+ */
+export async function findTeamHandoff(cwd) {
+  const { root } = await repoContext(cwd);
+  for (const rel of TEAM_HANDOFFS) {
+    const text = await readFile(path.join(root, ...rel.split('/')), 'utf8').catch(() => null);
+    if (text !== null && !text.includes(NOW_START)) return rel;
+  }
+  return null;
+}
+
 export async function locateHandoff(cwd, { track } = {}) {
   const { root, config, common } = await repoContext(cwd);
   const describe = (file, where) => ({

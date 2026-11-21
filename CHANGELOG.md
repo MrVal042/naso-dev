@@ -2,6 +2,11 @@
 
 ## 2.0.2
 
+### Added
+
+- **Branch exceptions the guide allows.** A contributing guide that names `<type>/<JIRA-KEY>-<short-name>` and, in the same paragraph, an exception such as `hotfix/vX.Y.Z` or a second `<…>` template: the pre-commit hook accepts the exception instead of warning on every hotfix branch, and the rules section and the review prompt name it. The NestJS example now allows its `fix/<short-name>` branches too.
+- **A handoff the repository already keeps is the one the block names.** With `HANDOFF.md`, `docs/HANDOFF.md`, `.claude/notes/HANDOFF.md` or a similar file that is not in NASO's format, Read First points there and says to update it the way it is kept, and setup writes no second, empty handoff. NASO's handoff commands are not pointed at it, because they would add their own sections to the team's file.
+
 ### Fixed
 
 - **Branch templates read ticket keys as keys.** In `<type>/<JIRA-KEY>-<short-name>`, every placeholder used to match anything, so `local/preview-1121-0104` was reported as following the rule. A ticket placeholder (`<KEY>`, `<JIRA-KEY>`, `<ticket>`, `<issue>`) now matches an uppercase key (`SCRUM-142`, or `SCRUM` before a `<n>`), and `<n>` matches digits. The review prompt and the pre-commit branch warning both use it.
