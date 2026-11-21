@@ -22,7 +22,7 @@
 
 import path from 'node:path';
 import { readFile, writeFile, mkdir, rename, stat } from 'node:fs/promises';
-import { parseArgs, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, pathExists, run } from './lib.mjs';
+import { parseArgs, listOption, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, pathExists, run } from './lib.mjs';
 import { readDecisions } from './decisions.mjs';
 
 export const NOW_START = '<!-- naso:now:start -->';
@@ -110,8 +110,8 @@ export function renderHandoff({ archiveShown }) {
     '',
     `- NOW is one current state, replaced whole with \`${cmd} handoff set\`: where things stand, the`,
     '  next steps, and the open items. Write an open item as `- [ ] …` or `- Waiting on <who>: …`;',
-    `  it gets an id, never ages out, and leaves only with \`${cmd} handoff done <id>\` or a set`,
-    '  that leaves it out.',
+    `  it gets an id, never ages out, and leaves only with \`${cmd} handoff done <id>\` or`,
+    '  `set --close <id>`. A set that leaves one out carries it over.',
     `- The log is dated history, newest first: \`${cmd} handoff log "…"\`. Lines older than ${LOG_DAYS}`,
     `  days, and the oldest past ${LOG_CAP}, move to the archive on their own.`,
     '',
@@ -211,27 +211,56 @@ export function logEntry(text, entryText, { today: on = today() } = {}) {
 
 /**
  * Replace NOW. Every open item and waiting line gets an id, keeping the one it had; a
- * waiting line becomes an open item so there is one way to close things. An open item
- * that was in NOW and is not in the new state is closed, and the log says so: a set that
- * silently dropped one would lose the only record that it was ever open.
+ * waiting line becomes an open item so there is one way to close things. A line with an
+ * id that is already open replaces that item: an update, never a second copy.
  *
- * Returns { text, items, closed }.
+ * An open item the new state leaves out is carried over, not closed. An agent rewriting NOW
+ * drops a "Waiting on …" line by mistake far more often than it means to close one, and a
+ * silent close loses the only record that somebody is still owed something. Only `close`
+ * (ids, from `--close`) or `closeItem` closes, and the log records each.
+ *
+ * Returns { text, items, carried, closed, unknown }. With an id in `close` that is not
+ * open, nothing changes and `unknown` lists it.
  */
-export function setNow(text, state, { today: on = today() } = {}) {
+export function setNow(text, state, { today: on = today(), close = [] } = {}) {
   const before = openItems(text);
+  const open = new Set(before.map((item) => item.id));
+  const closing = [...new Set(close.map(Number))];
+  const unknown = closing.filter((id) => !open.has(id));
+  if (unknown.length > 0) return { text, items: before, carried: [], closed: [], unknown };
+
   let next = highestId(text);
-  const lines = String(state).replace(/\r\n?/g, '\n').trim().split('\n').map((line) => {
-    const open = OPEN_ITEM.exec(line);
-    if (open) return `- [ ] (${open[1] ?? ++next}) ${open[2].trim()}`;
-    const waiting = WAITING.exec(line);
-    if (waiting) return `- [ ] (${waiting[1] ?? ++next}) ${waiting[2].trim()}`;
-    return line.trimEnd();
-  });
-  let result = withSection(text, NOW_START, NOW_END, asBody(lines.join('\n').trim() ? lines : []), 'NOW');
-  const kept = new Set(openItems(result).map((item) => item.id));
-  const closed = before.filter((item) => !kept.has(item.id));
+  const written = [];
+  let skipping = false;
+  for (const raw of String(state).replace(/\r\n?/g, '\n').trim().split('\n')) {
+    if (skipping && /^\s+\S/.test(raw)) continue;
+    skipping = false;
+    const open = OPEN_ITEM.exec(raw);
+    const waiting = open ? null : WAITING.exec(raw);
+    const match = open ?? waiting;
+    if (!match) {
+      written.push(raw.trimEnd());
+      continue;
+    }
+    const id = match[1] ? Number(match[1]) : ++next;
+    if (closing.includes(id)) {
+      skipping = true;
+      continue;
+    }
+    written.push(`- [ ] (${id}) ${match[2].trim()}`);
+  }
+  const present = new Set(written.map((line) => Number(OPEN_ITEM.exec(line)?.[1])).filter(Boolean));
+
+  const nowLines = nowSection(text).split('\n').map((line) => line.replace(/\r$/, ''));
+  const carried = before.filter((item) => !present.has(item.id) && !closing.includes(item.id));
+  const carriedLines = carried.flatMap((item) => nowLines.slice(item.from, item.to + 1));
+  const stateText = written.join('\n').trim();
+  const body = [...(stateText ? stateText.split('\n') : []), ...(carriedLines.length > 0 && stateText ? [''] : []), ...carriedLines];
+
+  let result = withSection(text, NOW_START, NOW_END, asBody(body), 'NOW');
+  const closed = before.filter((item) => closing.includes(item.id));
   for (const item of [...closed].reverse()) result = logEntry(result, `closed (${item.id}) ${item.text}`, { today: on });
-  return { text: result, items: openItems(result), closed };
+  return { text: result, items: openItems(result), carried, closed, unknown: [] };
 }
 
 /** Close one open item by id: out of NOW, into the log. `closed` is null when there is no such item. */
@@ -396,14 +425,16 @@ function printNow(text, located) {
 }
 
 export async function main(argv = process.argv.slice(2)) {
-  const { flags, values, positional } = parseArgs(argv);
+  const { flags, values, lists, positional } = parseArgs(argv);
   const cmd = nasoCommand();
   if (flags.has('help') || flags.has('h')) {
     console.log(`NASO handoff
 
 Usage:
   ${cmd} handoff [target-dir]                    create it if missing, then print NOW
-  ${cmd} handoff set "<state>" [target-dir]      replace NOW (also --file <path>, or - for stdin)
+  ${cmd} handoff set "<state>" [target-dir]      replace NOW (also --file <path>, or - for stdin);
+                                                 open items it leaves out are carried over
+      --close <id,…>                             close these open items as part of the set
   ${cmd} handoff log "<text>" [target-dir]       a dated line at the top of the log
   ${cmd} handoff done <id> [target-dir]          close an open item: out of NOW, into the log
   ${cmd} handoff trim [target-dir]               move old log lines to the archive
@@ -413,7 +444,8 @@ Usage:
   --max-lines <n>   the log's cap; the oldest lines leave past it (default ${LOG_CAP})
 
 NOW is one state, replaced whole. In it, "- [ ] …" and "- Waiting on …" lines are open items:
-they get an id, never age out, and leave only with done or a set that leaves them out. Only
+they get an id, never age out, and leave only with done or set --close; a set that leaves
+one out carries it over. A line with an open item's id updates that item. Only
 the log ages out, into a monthly archive that nothing reads at session start.
 
 Committed .naso/ keeps the handoff in .naso/HANDOFF.md. Otherwise it is under the git
@@ -427,6 +459,8 @@ directory, shared by every worktree of the clone.`);
   const limits = { days: numberOption(values, 'days', LOG_DAYS), cap: numberOption(values, 'max-lines', LOG_CAP) };
 
   if (sub === 'set') {
+    const close = listOption(lists, 'close');
+    if (close.some((id) => !/^\d+$/.test(id))) return refuse(`naso-dev handoff set: --close takes item numbers: --close 2,3`);
     let state;
     let target;
     if (values.has('file')) {
@@ -443,10 +477,17 @@ directory, shared by every worktree of the clone.`);
     if (!state || !state.trim()) {
       return refuse(`naso-dev handoff set: give the new state: ${cmd} handoff set "Where things stand. Next: … - [ ] open item", --file <path>, or - to read stdin.`);
     }
-    const result = await update(target ?? process.cwd(), (text, on) => setNow(text, state, { today: on }), limits);
+    const located = await locateHandoff(target ?? process.cwd());
+    const current = await readFile(located.file, 'utf8').catch(() => null);
+    const unknown = current === null ? close.map(Number) : setNow(current, state, { close: close.map(Number) }).unknown;
+    if (unknown.length > 0) {
+      return refuse(`naso-dev handoff set: no open item ${unknown.map((id) => `(${id})`).join(', ')} in ${located.shown}; nothing was changed. ${cmd} handoff lists them.`);
+    }
+    const result = await update(target ?? process.cwd(), (text, on) => setNow(text, state, { today: on, close: close.map(Number) }), limits);
     console.log(`Replaced NOW in ${result.located.shown}.`);
-    for (const item of result.items) console.log(`  open (${item.id}) ${item.text}`);
-    for (const item of result.closed) console.log(`  closed (${item.id}) ${item.text}: it was not in the new state, so the log records it as closed`);
+    for (const item of result.carried) console.log(`  carried over: (${item.id}) ${item.text}  (left out of the new state; close it with --close ${item.id} or ${cmd} handoff done ${item.id})`);
+    for (const item of result.closed) console.log(`  closed: (${item.id}) ${item.text}  (the log records it)`);
+    for (const item of result.items.filter((entry) => !result.carried.some((carried) => carried.id === entry.id))) console.log(`  open: (${item.id}) ${item.text}`);
     if (nowLineCount(result.text) > NOW_CAP) console.log(`NOW is ${nowLineCount(result.text)} lines, over its cap of ${NOW_CAP}. Say less: it is read at every session start.`);
     printArchived(result.archived, result.located);
     return;

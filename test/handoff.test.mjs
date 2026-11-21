@@ -49,14 +49,66 @@ test('set replaces NOW and gives each open item and waiting line an id', () => {
   assert.match(now, /Parser rewrite is in review\./);
   assert.match(now, /- \[ \] \(2\) Benchmarks for large files/);
   assert.match(now, /- \[ \] \(3\) Waiting on the platform team: CI runner quota/);
-  assert.deepEqual(openItems(next).map((item) => item.id), [2, 3]);
+  assert.deepEqual(openItems(next).map((item) => item.id).sort(), [1, 2, 3], 'the old item is carried over');
 });
 
-test('an item left out of a set is closed, and the log says so', () => {
-  const first = setNow(fresh(), '- [ ] Keep me\n- [ ] Drop me', { today: '2026-11-20' }).text;
-  const { text, closed } = setNow(first, 'State.\n- [ ] (1) Keep me', { today: '2026-11-21' });
+test('an open item a set leaves out is carried over into the new NOW, not closed', () => {
+  const first = setNow(fresh(), '- [ ] Keep me\n- Waiting on ops: DNS', { today: '2026-11-20' }).text;
+  const { text, carried, closed } = setNow(first, 'A new state that forgot both items.', { today: '2026-11-21' });
+  assert.deepEqual(carried.map((item) => item.id), [1, 2]);
+  assert.deepEqual(closed, []);
+  assert.match(nowSection(text), /A new state that forgot both items\./);
+  assert.match(nowSection(text), /- \[ \] \(1\) Keep me/);
+  assert.match(nowSection(text), /- \[ \] \(2\) Waiting on ops: DNS/);
+  assert.doesNotMatch(logSection(text), /closed/);
+});
+
+test('set --close closes the items it names, and the log records each', () => {
+  const first = setNow(fresh(), '- [ ] One\n- [ ] Two\n  with detail', { today: '2026-11-20' }).text;
+  const { text, closed, carried } = setNow(first, 'State.', { today: '2026-11-21', close: [2] });
   assert.deepEqual(closed.map((item) => item.id), [2]);
-  assert.match(logSection(text), /- 2026-11-21: closed \(2\) Drop me/);
+  assert.deepEqual(carried.map((item) => item.id), [1]);
+  assert.doesNotMatch(nowSection(text), /Two|with detail/);
+  assert.match(logSection(text), /- 2026-11-21: closed \(2\) Two/);
+});
+
+test('set --close with an id that is not open is refused, and nothing changes', () => {
+  const first = setNow(fresh(), '- [ ] One').text;
+  const result = setNow(first, 'State.', { close: [9] });
+  assert.deepEqual(result.unknown, [9]);
+  assert.equal(result.text, first);
+});
+
+test('a set that rewrites an open item with the same id updates it, never duplicates it', () => {
+  const first = setNow(fresh(), '- [ ] Waiting on ops: DNS').text;
+  const { text, carried } = setNow(first, 'State.\n- [ ] (1) Waiting on ops: DNS, ticket filed');
+  assert.deepEqual(carried, []);
+  const now = nowSection(text);
+  assert.equal(now.match(/\(1\)/g).length, 1);
+  assert.match(now, /\(1\) Waiting on ops: DNS, ticket filed/);
+});
+
+test('handoff set prints what it carried over, and --close from the command line closes', async () => {
+  await withRepo(async ({ dir }) => {
+    await tracked(dir);
+    await naso(['handoff', 'set', 'Start.\n- [ ] Review\n- Waiting on design: icons', dir], dir);
+    const carried = await naso(['handoff', 'set', 'Rewritten without items.', dir], dir);
+    assert.equal(carried.code, 0, carried.stderr);
+    assert.match(carried.stdout, /carried over: \(1\) Review/);
+    assert.match(carried.stdout, /carried over: \(2\) Waiting on design: icons/);
+
+    const closed = await naso(['handoff', 'set', 'Rewritten again.', '--close', '2', dir], dir);
+    assert.equal(closed.code, 0, closed.stderr);
+    assert.match(closed.stdout, /closed: \(2\) Waiting on design: icons/);
+    const now = nowSection(await read(dir, '.naso/HANDOFF.md'));
+    assert.match(now, /\(1\) Review/);
+    assert.doesNotMatch(now, /icons/);
+
+    const before = await read(dir, '.naso/HANDOFF.md');
+    const unknown = await naso(['handoff', 'set', 'x', '--close', '7', dir], dir);
+    assert.equal(unknown.code, 1);
+    assert.equal(await read(dir, '.naso/HANDOFF.md'), before, 'a refused set writes nothing');
+  });
 });
 
 test('set without touching the log', () => {
