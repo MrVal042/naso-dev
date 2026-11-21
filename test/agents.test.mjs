@@ -138,7 +138,10 @@ test('in a terminal, setup asks about other agents, Enter answers the recommende
   const declined = await answerRealQuestions({ hook: none, hasBlock: false, agents }, ['\r', '\r', '\u001b[B', '\u001b[B', '\r']);
   assert.equal(declined.answer.agents, undefined);
 
-  const all = await answerRealQuestions({ hook: none, hasBlock: false, agents: [] }, ['\r', '\r', '\r']);
+  // None set up here: Enter writes nothing, and all four are one key away.
+  const nothing = await answerRealQuestions({ hook: none, hasBlock: false, agents: [] }, ['\r', '\r', '\r']);
+  assert.equal(nothing.answer.agents, undefined);
+  const all = await answerRealQuestions({ hook: none, hasBlock: false, agents: [] }, ['\r', '\r', '\u001b[A', '\r']);
   assert.deepEqual(all.answer.agents, ['all']);
 });
 

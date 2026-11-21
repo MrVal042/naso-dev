@@ -209,8 +209,8 @@ function reportExistingState(state, cwd, style) {
  * Ask what the plan depends on, and nothing it does not.
  *
  * Each question defaults to Yes, marked "(recommended)": commit the briefing so every clone
- * gets it, chain a hook NASO did not write, regenerate an untouched block, point the other
- * agents and Claude Code at it. A run of Enters gives the complete install, and the plan is
+ * gets it, chain a hook NASO did not write, regenerate an untouched block, point the agents
+ * this repository uses and Claude Code at it. A run of Enters gives the complete install, and the plan is
  * still shown before anything is written. `--yes` asks nothing, so a scripted run keeps the
  * flags' own defaults. A question whose answer cannot change the plan is
  * not asked: the hook question only appears when there is a choice to make, and the
@@ -300,10 +300,11 @@ async function ask(style, options, context, io = {}) {
 
   const extras = {};
   // Pointers for other agents, only from the real flow (it passes `agents`). The default is
-  // the agents this repository shows signs of, or all four when it shows none.
+  // the agents this repository shows signs of, and No when it shows none: four files for tools
+  // nobody used (a .github/ folder on a GitLab repository) was noise a team had to clean up.
   if (context.agents && (options.agents ?? []).length === 0) {
     const detected = context.agents;
-    const recommended = detected.length > 0 ? 'detected' : 'all';
+    const recommended = detected.length > 0 ? 'detected' : 'none';
     const mark = (value) => (value === recommended ? ' (recommended)' : '');
     const choice = await select({
       message: 'Point other agents at AGENTS.md? (one line each, never a copy; Claude Code gets CLAUDE.md, Codex reads AGENTS.md itself)',
@@ -311,7 +312,7 @@ async function ask(style, options, context, io = {}) {
       options: [
         ...(detected.length > 0 ? [{ value: 'detected', label: `The ones set up here: ${detected.map((entry) => entry.label).join(', ')}${mark('detected')}`, hint: detected.map((entry) => entry.signs[0]).join(', ') }] : []),
         { value: 'all', label: `Cursor, Copilot, Gemini and Windsurf${mark('all')}`, hint: 'a file each' },
-        { value: 'none', label: 'No' },
+        { value: 'none', label: `No${mark('none')}`, hint: detected.length > 0 ? null : 'none of them is set up here' },
       ],
       style,
       ...io,
