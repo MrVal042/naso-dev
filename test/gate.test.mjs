@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
-import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod, cp, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { toolVersion, pathExists } from '../tooling/lib.mjs';
@@ -12,6 +12,8 @@ import { buildHookScript, isNasoHook, removeArtifacts } from '../tooling/install
 import { acquire } from '../tooling/lock.mjs';
 import { vendorTooling, isVendored, vendoredVersion } from '../tooling/vendor.mjs';
 import {
+  logCalls,
+  fakeBin,
   PACKAGE_ROOT,
   TOOL_DIR,
   BIN,
@@ -247,15 +249,18 @@ test('a commit still runs the gate after the package directory is deleted', asyn
   const copy = await mkdtemp(path.join(os.tmpdir(), 'naso-pkg-'));
   try {
     await mkdir(path.join(copy, 'tooling'), { recursive: true });
-    for (const name of await readdir(TOOL_DIR)) {
-      await exec('cp', ['-R', path.join(TOOL_DIR, name), path.join(copy, 'tooling', name)]);
-    }
+    // Node's own copy, not cp: the suite runs on Windows too.
+    await cp(TOOL_DIR, path.join(copy, 'tooling'), { recursive: true });
     await mkdir(path.join(copy, 'bin'), { recursive: true });
-    await exec('cp', [BIN, path.join(copy, 'bin', 'naso-dev.mjs')]);
-    await exec('cp', [path.join(PACKAGE_ROOT, 'VERSION'), path.join(copy, 'VERSION')]);
-    await exec('cp', [path.join(PACKAGE_ROOT, 'package.json'), path.join(copy, 'package.json')]);
-    // An installed package has its dependencies; what goes away below is the package.
-    await exec('ln', ['-s', path.join(PACKAGE_ROOT, 'node_modules'), path.join(copy, 'node_modules')]);
+    await cp(BIN, path.join(copy, 'bin', 'naso-dev.mjs'));
+    await cp(path.join(PACKAGE_ROOT, 'VERSION'), path.join(copy, 'VERSION'));
+    await cp(path.join(PACKAGE_ROOT, 'package.json'), path.join(copy, 'package.json'));
+    // An installed package has its dependencies; what goes away below is the package. A
+    // junction on Windows, which needs no administrator rights; NASO has no node_modules of
+    // its own, so there may be nothing to link.
+    if (await exists(PACKAGE_ROOT, 'node_modules')) {
+      await symlink(path.join(PACKAGE_ROOT, 'node_modules'), path.join(copy, 'node_modules'), 'junction');
+    }
 
     const dir = await mkdtemp(path.join(os.tmpdir(), 'naso-repo-'));
     try {
@@ -341,23 +346,17 @@ test('validate spawns pnpm, never npm or npx, in a pnpm repository (full and sta
     await put(dir, '.prettierrc', '{}\n');
     await put(dir, '.gitignore', 'node_modules/\n');
     await put(dir, 'src/index.ts', 'export const x = 1;\n');
-    for (const bin of ['prettier', 'eslint', 'tsc']) {
-      await put(dir, `node_modules/.bin/${bin}`, '#!/bin/sh\nexit 0\n');
-      await chmod(path.join(dir, `node_modules/.bin/${bin}`), 0o755);
-    }
+    for (const bin of ['prettier', 'eslint', 'tsc']) await fakeBin(path.join(dir, 'node_modules/.bin'), bin);
     await git('add', '-A');
     await git('commit', '-qm', 'pnpm repo');
 
     // Stand-ins for every manager, so what validate *spawns* is recorded rather than
     // what it prints.
-    const fakeBin = await mkdtemp(path.join(os.tmpdir(), 'naso-fakebin-'));
-    const log = path.join(fakeBin, 'calls.log');
+    const fakeBinDir = await mkdtemp(path.join(os.tmpdir(), 'naso-fakebin-'));
+    const log = path.join(fakeBinDir, 'calls.log');
     try {
-      for (const name of ['pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx']) {
-        await writeFile(path.join(fakeBin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`);
-        await chmod(path.join(fakeBin, name), 0o755);
-      }
-      const env = { PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` };
+      let env;
+      for (const name of ['pnpm', 'npm', 'npx', 'yarn', 'bun', 'bunx']) env = await fakeBin(fakeBinDir, name, logCalls(log, name));
 
       const full = await exec(process.execPath, [path.join(TOOL_DIR, 'validate.mjs'), dir], dir, env);
       assert.equal(full.code, 0, full.stdout + full.stderr);
@@ -386,7 +385,7 @@ test('validate spawns pnpm, never npm or npx, in a pnpm repository (full and sta
         assert.ok(calls.includes(expected), `expected \`${expected}\` in:\n${calls.join('\n')}`);
       }
     } finally {
-      await rm(fakeBin, { recursive: true, force: true });
+      await rm(fakeBinDir, { recursive: true, force: true });
     }
   });
 });
@@ -409,7 +408,7 @@ test('validate full run honours --scope and --strict, not only the environment',
   });
 });
 
-test('removeArtifacts reports a file it could not delete instead of claiming it did', async () => {
+test('removeArtifacts reports a file it could not delete instead of claiming it did', { skip: process.platform === 'win32' && 'chmod cannot make a directory read-only on Windows' }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'naso-rm-'));
   const locked = path.join(dir, 'locked');
   await mkdir(locked);
@@ -426,7 +425,7 @@ test('removeArtifacts reports a file it could not delete instead of claiming it 
   }
 });
 
-test('a lock that cannot be released is reported, not silently left behind', async () => {
+test('a lock that cannot be released is reported, not silently left behind', { skip: process.platform === 'win32' && 'chmod cannot make a directory read-only on Windows' }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'naso-lock-'));
   const lock = await acquire(dir);
   assert.ok(lock.acquired);
@@ -453,25 +452,22 @@ test('validate does not type-check twice when the lint script is the type-check'
     await put(dir, 'tsconfig.json', '{}\n');
     await put(dir, '.gitignore', 'node_modules/\n');
     await put(dir, 'src/index.ts', 'export const x = 1;\n');
-    await put(dir, 'node_modules/.bin/tsc', '#!/bin/sh\nexit 0\n');
-    await chmod(path.join(dir, 'node_modules/.bin/tsc'), 0o755);
+    await fakeBin(path.join(dir, 'node_modules/.bin'), 'tsc');
     await git('add', '-A');
     await git('commit', '-qm', 'tsc lint');
 
-    const fakeBin = await mkdtemp(path.join(os.tmpdir(), 'naso-fakebin-'));
-    const log = path.join(fakeBin, 'calls.log');
+    const fakeBinDir = await mkdtemp(path.join(os.tmpdir(), 'naso-fakebin-'));
+    const log = path.join(fakeBinDir, 'calls.log');
     try {
-      for (const name of ['npm', 'npx']) {
-        await writeFile(path.join(fakeBin, name), `#!/bin/sh\necho "${name} $*" >> "${log}"\nexit 0\n`);
-        await chmod(path.join(fakeBin, name), 0o755);
-      }
-      const full = await exec(process.execPath, [path.join(TOOL_DIR, 'validate.mjs'), dir], dir, { PATH: `${fakeBin}${path.delimiter}${process.env.PATH}` });
+      let env;
+      for (const name of ['npm', 'npx']) env = await fakeBin(fakeBinDir, name, logCalls(log, name));
+      const full = await exec(process.execPath, [path.join(TOOL_DIR, 'validate.mjs'), dir], dir, env);
       assert.equal(full.code, 0, full.stdout + full.stderr);
       const calls = (await readFile(log, 'utf8')).trim().split('\n');
       assert.deepEqual(calls, ['npm run lint'], calls.join('\n'));
       assert.match(full.stdout, /TypeScript: SKIP \(the "lint" script is the type-check\)/);
     } finally {
-      await rm(fakeBin, { recursive: true, force: true });
+      await rm(fakeBinDir, { recursive: true, force: true });
     }
   });
 });

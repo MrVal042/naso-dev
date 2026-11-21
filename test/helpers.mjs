@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import os from 'node:os';
-import { mkdtemp, rm, mkdir, writeFile, readFile, readdir } from 'node:fs/promises';
+import { mkdtemp, rm, mkdir, writeFile, readFile, readdir, chmod } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -87,6 +87,13 @@ export function exec(cmd, args, cwd, env = {}) {
     // npm exports FORCE_COLOR to the scripts it runs. Children get it only when a test
     // asks for it, so `npm test` and `node --test` see the same output.
     const { FORCE_COLOR, ...inherited } = process.env;
+    // Windows spells it Path. Spread into a plain object, an override called PATH would sit
+    // beside the inherited Path, and which one the child sees is up to the platform.
+    for (const key of Object.keys(env)) {
+      for (const existing of Object.keys(inherited)) {
+        if (existing !== key && existing.toUpperCase() === key.toUpperCase()) delete inherited[existing];
+      }
+    }
     const child = spawn(cmd, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...inherited, ...env } });
     let stdout = '';
     let stderr = '';
@@ -153,6 +160,26 @@ export async function withRepo(fn, { seed = true } = {}) {
     await rm(dir, { recursive: true, force: true });
   }
 }
+
+/**
+ * A stand-in for a program, runnable on every platform: `<name>.cjs` holds what it does, and
+ * two shims start it with this Node, `<name>` for sh and `<name>.cmd` for Windows. The script
+ * gets the arguments as process.argv.slice(2). Returns the PATH that puts `dir` first.
+ */
+export async function fakeBin(dir, name, js = '') {
+  await mkdir(dir, { recursive: true });
+  const script = path.join(dir, `${name}.cjs`);
+  await writeFile(script, js, 'utf8');
+  const sh = path.join(dir, name);
+  await writeFile(sh, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(script)} "$@"\n`, 'utf8');
+  await chmod(sh, 0o755);
+  await writeFile(path.join(dir, `${name}.cmd`), `@"${process.execPath}" "${script}" %*\r\n`, 'utf8');
+  return { PATH: `${dir}${path.delimiter}${process.env.PATH ?? process.env.Path ?? ''}` };
+}
+
+/** JavaScript for a fake that appends `<label> <args>` to `log`, one line per call. */
+export const logCalls = (log, label = null) =>
+  `require('fs').appendFileSync(${JSON.stringify(log)}, ${label ? `${JSON.stringify(`${label} `)} + ` : ''}process.argv.slice(2).join(' ') + '\\n');\n`;
 
 export async function put(dir, relPath, contents = '') {
   const full = path.join(dir, relPath);

@@ -2,7 +2,7 @@
 // Built entirely on Node.js core modules — no npm packages.
 
 import { access, readFile, readdir, constants } from 'node:fs/promises';
-import { realpathSync, readFileSync, existsSync } from 'node:fs';
+import { realpathSync, readFileSync, existsSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline/promises';
 import path from 'node:path';
@@ -51,14 +51,69 @@ export async function allExisting(cwd, candidates) {
  * output directly to the parent process instead (useful for lint/test/tsc).
  * Never throws — command failures and spawn errors both resolve normally.
  */
+/** An environment variable by name, in any case: Windows has `Path`, not `PATH`. */
+function envValue(env, name) {
+  const key = Object.keys(env ?? {}).find((candidate) => candidate.toUpperCase() === name);
+  return key ? env[key] : undefined;
+}
+
+function isFileSync(candidate) {
+  try {
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * One argument for cmd.exe: in double quotes, with each quote doubled. Inside quotes
+ * cmd.exe treats & | < > ( ) as text. It still expands %NAME% when NAME is set; nothing
+ * NASO passes is shaped like that.
+ */
+export function windowsQuote(arg) {
+  return `"${String(arg).replace(/"/g, '""')}"`;
+}
+
+/**
+ * How to start `cmd` on this platform: `{ cmd, args, shell }` for spawn.
+ *
+ * Off Windows it is the command as given, with no shell. On Windows the command is looked
+ * up on Path in PATHEXT order, as cmd.exe would. An .exe runs directly. A .cmd or .bat (npm,
+ * npx, pnpm, yarn, bun) runs through the shell as one quoted line, because Node refuses
+ * to spawn one without a shell (EINVAL since 18.20.2 and 20.12.2), and `shell: true` with
+ * unquoted arguments would split a path with a space in it. A command not found is left
+ * as it is, for spawn to report the way it always has.
+ */
+export function spawnPlan(cmd, args = [], { platform = process.platform, env = process.env, isFile = isFileSync } = {}) {
+  const asIs = { cmd, args, shell: false };
+  if (platform !== 'win32') return asIs;
+  const win = path.win32;
+  const exts = String(envValue(env, 'PATHEXT') ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const hasExt = exts.some((ext) => cmd.toUpperCase().endsWith(ext.toUpperCase()));
+  const names = hasExt ? [cmd] : exts.map((ext) => `${cmd}${ext}`);
+  const dirs = /[\\/]/.test(cmd) ? [''] : String(envValue(env, 'PATH') ?? '').split(';').filter(Boolean);
+  for (const dir of dirs) {
+    for (const name of names) {
+      const candidate = dir ? win.join(dir, name) : name;
+      if (!isFile(candidate)) continue;
+      if (/\.(cmd|bat)$/i.test(candidate)) {
+        return { cmd: [candidate, ...args].map(windowsQuote).join(' '), args: [], shell: true };
+      }
+      return { cmd: candidate, args, shell: false };
+    }
+  }
+  return asIs;
+}
+
 export function run(cmd, args = [], opts = {}) {
   return new Promise((resolve) => {
     let child;
     try {
-      child = spawn(cmd, args, {
+      const plan = spawnPlan(cmd, args);
+      child = spawn(plan.cmd, plan.args, {
         cwd: opts.cwd ?? process.cwd(),
         stdio: opts.inherit ? 'inherit' : ['ignore', 'pipe', 'pipe'],
-        shell: false,
+        shell: plan.shell,
         env: process.env,
       });
     } catch (err) {
