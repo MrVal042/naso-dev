@@ -29,6 +29,7 @@ import { checkBriefing } from './check.mjs';
 import { NASO_DIR } from './vendor.mjs';
 import { readDecidedNotes } from './toolchain.mjs';
 import { readDecisions, auditDecisions, indexFileOf, citedLines, sameDecisionText } from './decisions.mjs';
+import { GUIDES_DIR, ROOT_LINE_BUDGET, TOUCH_HEADING } from './guides.mjs';
 
 /**
  * The files where a repository writes its own rules, by kind, in reading order.
@@ -228,6 +229,8 @@ export async function reviewState(cwd) {
     generatedAt: text?.match(/^<!--\s*generated-at:\s*(\S+)\s*-->$/m)?.[1] ?? null,
     check,
     missingSections: check ? await missingSectionText(cwd, check.notices ?? []) : [],
+    layout: (check?.notices ?? []).filter((notice) => notice.text),
+    guides: (check?.guides ?? []).filter((guide) => guide.text !== null).length,
     sources: ruleSources(files ?? []),
     decisions,
     findings: audit.findings ?? [],
@@ -249,6 +252,7 @@ function installedLines(state, index) {
     `- ${AGENTS_FILE}, the part between ${NASO_START} and ${NASO_END}: derived from file lists, manifests and git history. Its aim: every path is real, every count was counted, and every rule is this repository's own.`,
     `- ${state.decisions.dir}/: one file per decision the team made, with who decided and where, listed in ${index}${state.decisions.indexExists ? '' : ' once the first one is recorded'}. Agents propose; only a person accepts.`,
   ];
+  if (state.guides > 0) lines.push(`- ${GUIDES_DIR}/: ${count(state.guides, 'guide')} the block links in its ${TOUCH_HEADING} table, each read only when that kind of task comes up.`);
   if (state.claudeLinks) lines.push('- CLAUDE.md: its `@AGENTS.md` line makes Claude Code load the briefing.');
   if (state.vendored) lines.push('- .naso/tooling/ and .naso/config.json: the toolset the hook runs, vendored, and the choices setup made. Never edit the toolset by hand; `refresh` overwrites it.');
   if (state.hook) lines.push('- .git/hooks/pre-commit, on this machine only: on every commit it checks staged files for secrets, scope, format and lint, adds a briefing line for a new top-level area, and refreshes the decisions list.');
@@ -258,6 +262,15 @@ function installedLines(state, index) {
 /** Where things stand, so the agent starts from the current state rather than from zero. */
 function stateLines(state, cmd, here) {
   const lines = [];
+  // Before anything else: a single-file block is migrated first, so the review edits each
+  // section where it will live.
+  for (const notice of state.layout ?? []) {
+    lines.push(
+      notice.kind === 'single-file'
+        ? `- ${notice.text} Run \`${cmd} briefing${here} migrate --write\` before anything else, then review the block and the guides it writes.`
+        : `- ${notice.text}`,
+    );
+  }
   for (const section of state.missingSections ?? []) {
     lines.push(
       `- The block has no ${section.heading} section (added in ${section.since}): ${section.why}. ` +
@@ -359,16 +372,9 @@ Run \`${cmd} review${here}\` again whenever the repository's rules change: it pr
 this prompt with the state at that time.
 
 --------------------------------------------------------------
-Review NASO in this repository${where} and make it fit this repository.
-
-NASO keeps one briefing that every coding agent and every new session starts
-from, plus a record of what the team decided, so no session, account or agent
-has to rediscover the repository or re-ask a question the team already settled.
-Here it consists of:
+Review NASO in this repository${where} and make it fit this repository. NASO is the
+briefing every session starts from, and the record of what the team decided. Here it is:
 ${installedLines(state, index).join('\n')}
-
-Your job: correct what is wrong, remove what does not earn its place, add what
-an agent would otherwise get wrong, and record what the team already decided.
 
 Where it stands now:
 ${stateLines(state, cmd, here).join('\n')}
@@ -376,79 +382,61 @@ ${stateLines(state, cmd, here).join('\n')}
 This repository's own rules are in these files:
 ${sources.join('\n')}
 
-1. Run \`git status --short\`, \`git rev-parse HEAD\` and \`git write-tree\`, and
-   keep all three outputs. Never run git add, commit,
-   stash, reset or checkout: leave the index exactly as you found it.
-2. Read the files above, and any file they point to. Never open or print .env
-   files, keys or other credentials; name them by path only.
-3. Audit every line of the NASO block against those files and the code: paths,
-   counts, commands, versions, the commit format, the gate, and what the hook
-   enforces. For each line decide: keep, correct, or remove.
-   - Correct what the repository contradicts.
-   - Remove a line that is wrong and cannot be corrected, repeats what a
-     linked file already says, or would not change what an agent does.
-   - Add what an agent would otherwise get wrong: framework rules; generated,
-     copied and vendored files and how each is regenerated; import and module
-     boundaries; protected paths and their owners; which commands only check,
-     which rewrite files, which never exit, and which need a build first;
-     branch, commit and merge rules with their exceptions; what CI runs and
-     what must not change in it; which document wins when two disagree; and
-     work that belongs to another repository or team.
-   Prefer a link to the file that states a rule over copying the rule.
-4. Cite every line you add or change: file and line numbers
-   (\`CONTRIBUTING.md\` lines 6-9). Quote whole sentences in “…”, never a
-   fragment cut mid-link; the checker looks for the quote in the lines cited.
-   If you cannot cite it, leave it out. Write a path in another
-   repository as \`repo:path\`; write code that is not a path (a method name, a
-   branch pattern) without backticks, or the checker tests it as a file.
-5. Edit only between ${NASO_START} and ${NASO_END}. Everything outside the
-   markers is the team's own text.
+1. Run \`git status --short\`, \`git rev-parse HEAD\` and \`git write-tree\`; keep all
+   three outputs. Never run git add, commit, stash, reset or checkout.
+2. Read the files above and what they point to. Never open or print .env files,
+   keys or other credentials; name them by path only.
+3. Audit every line of the NASO block, and of the guides it links in ${GUIDES_DIR}/,
+   against those files and the code. Keep, correct or remove each one:
+   - Correct what the repository contradicts. Remove what is wrong and cannot be
+     corrected, repeats a linked file, or would not change what an agent does.
+   - Add what an agent would otherwise get wrong: framework rules; generated and
+     vendored files and how each is regenerated; import boundaries; protected
+     paths and their owners; which commands only check, rewrite files, never
+     exit or need a build first; branch, commit and merge rules with their
+     exceptions; what CI runs; which document wins; work that belongs elsewhere.
+   - Every session reads the whole block, so keep it under ${ROOT_LINE_BUDGET} lines of text.
+     Detail that one kind of task needs goes in the guide ${TOUCH_HEADING} names for
+     it. Prefer a link to the file that states a rule over copying the rule.
+4. Cite every line you add or change: file and line numbers (\`CONTRIBUTING.md\`
+   lines 6-9). Quote whole sentences in “…”; the checker looks for the quote in
+   the lines cited. If you cannot cite it, leave it out. Write a path in another
+   repository as \`repo:path\`, and code that is not a path without backticks.
+5. Edit only between ${NASO_START} and ${NASO_END}, and in ${GUIDES_DIR}/.
+   Everything else is the team's own text.
 6. Decisions. Read ${index} first, if it exists.
-   - Propose each decision the team already made but never recorded (docs that
-     mark something decided, CONTRIBUTING rules, architecture choices) once:
+   - Propose once each decision the team made but never recorded:
      \`${cmd} decide${here} --title "…" --decision "…" --source "<file> line <n>" --why "…"\`
      with \`--applies <paths>\` and one \`--considered "<option> — <why not>"\` per
-     alternative the docs say was turned down. Quote every value.
-   - Never propose one that is already recorded; \`decide\` refuses a title it
-     has, and warns when another record already cites the same line.
-   - Never write how many decisions there are, or their ids, into the block:
-     the next \`decide\` makes that stale. Point to ${index} instead.
-   - Never accept, reject or supersede a decision. List them for the person.
-7. Audit the rest of what NASO installed here (the list at the top) against
-   this repository. Run every check-only tool this repository and its CI use
-   (lint, format check, typecheck, tests, and the secret scanner if one is
-   installed, such as \`gitleaks dir . --redact\`) on ${NASO_DIR}/ and ${state.decisions.dir}/,
-   and on ${AGENTS_FILE} and CLAUDE.md; never the commands that rewrite files.
-   Check that the hook does not duplicate or fight a hook the team already
-   runs, and name anything NASO wrote that this repository does not want. Do
-   not change files outside the block: for each tool that complains, report
-   the config change that fixes it (an ignore entry, an override), never an
-   edit to ${NASO_DIR}/tooling/.
+     alternative turned down. Quote every value. \`decide\` refuses a title it has.
+   - Never write how many decisions there are, or their ids, into the block or a
+     guide; point to ${index}. Never accept, reject or supersede one.
+7. Audit the rest of what NASO installed here. Run every check-only tool this repository and its CI use
+   (lint, format check, typecheck, tests, and the secret scanner if one is installed, such as \`gitleaks dir . --redact\`)
+   on ${NASO_DIR}/ and ${state.decisions.dir}/, and on ${AGENTS_FILE} and CLAUDE.md; never the commands
+   that rewrite files. Check the hook does not fight a hook the team runs. For
+   each complaint, report the config change that fixes it; never edit ${NASO_DIR}/tooling/.
 8. Run \`${cmd} briefing${here}\` and fix everything it reports until it passes.
-9. Run \`git rev-parse HEAD\` and \`git write-tree\` again. You never stage, so
-   they should match step 1. If either changed and you did not change it, stop:
-   another session or person is writing to this repository. Say so, show
-   \`git diff --stat <tree from step 1> <tree now>\`, and report nothing else
-   until the person says to continue.
-10. Run \`git status --short\` again. If anything differs from step 1 beyond the
-    files you meant to change, say exactly what. Do not undo it yourself.
-11. Do not commit.
+9. Run \`git rev-parse HEAD\` and \`git write-tree\` again; they should match step 1.
+   If either changed and you did not change it, stop: another session or person
+   is writing here. Show \`git diff --stat <tree from step 1> <tree now>\` and
+   report nothing else until the person says to continue.
+10. Run \`git status --short\` again and name anything that differs beyond the
+    files you meant to change. Do not undo it yourself. Do not commit.
 
 Report, in this order:
-1. The diff of ${AGENTS_FILE}.
-2. One row per change: what was wrong, missing or removed, and the file and
-   lines that prove it.
+1. The diff of ${AGENTS_FILE} and ${GUIDES_DIR}/.
+2. One row per change: what was wrong, missing or removed, and the file and lines
+   that prove it.
 3. What you confirmed correct, in one paragraph.
 4. Decisions you proposed, with their ids. Then what only a person can settle:
    proposals to accept (\`${cmd} decisions accept <id>\`) or reject, audit
    findings, and any two files in this repository that disagree.
-5. For NASO upstream: bugs you hit in NASO, and each fact NASO should derive on
-   its own, with the file it would read it from.
-6. Under the heading "What NASO gives this repository": counted and
-   specific to it, the claims the check verifies, the rules an agent now gets
-   right the first time that it would have got wrong, the decisions recorded
-   and how a new session finds them, and what the hook checks on every commit.
-   Only what you verified in this run.
+5. For NASO upstream: bugs you hit, and each fact NASO should derive on its own,
+   with the file it would read it from.
+6. Under the heading "What NASO gives this repository", only what you verified in
+   this run: the claims the check verifies, the rules an agent now gets right the
+   first time, how a new session finds the decisions, what the hook checks.
 7. Last, a "Commit plan": the branch this repository's rules require for
    this change (and whether the current branch is it), the exact files to
    stage as one \`git add -- …\` line, staged files that are not NASO's and

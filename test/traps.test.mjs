@@ -6,7 +6,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withRepo, put, read, naso, seedProject, driveFlow } from './helpers.mjs';
+import { withRepo, put, read, naso, seedProject, driveFlow, readBriefing } from './helpers.mjs';
 import { FIXTURES, withFixture } from './fixtures/matrix.mjs';
 
 const HEADING = '## Rules That Are Easy To Get Wrong';
@@ -24,7 +24,7 @@ async function setUp(dir) {
   assert.equal(res.code, 0, res.stdout + res.stderr);
   const check = await naso(['briefing', dir, 'check'], dir);
   assert.equal(check.code, 0, `the briefing must pass its own check:\n${check.stdout}${check.stderr}`);
-  return read(dir, 'AGENTS.md');
+  return readBriefing(dir);
 }
 
 const decision = (n, title, status, why) =>

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readdir } from 'node:fs/promises';
 import { parseGitlabJobs, parseWorkflowJobs, diffCheckPaths, extractPathTokens } from '../tooling/briefing.mjs';
-import { AGENTS, withRepo, put, read, sectionOf } from './helpers.mjs';
+import { AGENTS, withRepo, put, read, sectionOf, readBriefing } from './helpers.mjs';
 
 const GITLAB_CI = `include:
   - project: platform/ci-templates
@@ -111,7 +111,7 @@ test('a ticket-keyed history is stated as `type: KEY-n: summary`, not `type(scop
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git, SCRUM_HISTORY);
     assert.equal((await bare(['--yes'])).code, 0);
-    const commits = sectionOf(await read(dir, AGENTS), 'Commit Standard');
+    const commits = sectionOf(await readBriefing(dir), 'Commit Standard');
     assert.doesNotMatch(commits, /type\(scope\)/);
     assert.match(commits, /`type: SCRUM-n: summary`/);
     assert.match(commits, /non-merge commits/);
@@ -122,7 +122,7 @@ test('a history that rarely uses a scope is not told to add one', async () => {
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git, ['feat: a', 'fix(api): b', 'fix: c', 'docs: d', 'chore: e', 'test: f']);
     assert.equal((await bare(['--yes'])).code, 0);
-    const commits = sectionOf(await read(dir, AGENTS), 'Commit Standard');
+    const commits = sectionOf(await readBriefing(dir), 'Commit Standard');
     assert.match(commits, /`type: summary`/);
     assert.doesNotMatch(commits, /follow `type\(scope\): summary`/);
   });
@@ -146,7 +146,7 @@ test('.gitlab-ci.yml is the gate, and the briefing does not say the repository n
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /names no single gate/);
     assert.match(text, /CI is the gate: `\.gitlab-ci\.yml` runs 5 jobs/);
     assert.match(text, /lint \(`npm run lint`\)/);
@@ -159,7 +159,7 @@ test('a script that rewrites files is not listed as a validation command', async
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     const commands = text.match(/```bash\n([\s\S]*?)```/)?.[1] ?? '';
     assert.doesNotMatch(commands, /npm run format\n/);
     assert.match(commands, /npm run format:check/);
@@ -172,7 +172,7 @@ test('the alias line states the mapping once, under Code Conventions, and claims
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(sectionOf(text, 'Code Conventions'), /^Import aliases: @ → src /m);
     assert.doesNotMatch(sectionOf(text, 'Boundaries'), /Import aliases/, 'not a second time');
     assert.doesNotMatch(text, /the one mistake/);
@@ -186,7 +186,7 @@ test('the block has no language mix, ignored-path list or local excludes: none c
     await git('add', '-A');
     await git('commit', '-qm', 'chore: SCRUM-5: ignore');
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     for (const gone of ['Language mix', '**Ignored paths.**', '**Re-included.**', '**Local excludes.**']) {
       assert.ok(!text.includes(gone), `${gone} is not rendered`);
     }
@@ -198,7 +198,7 @@ test('a TypeScript repository with no "type" field is not called CommonJS throug
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /Modules: CommonJS by default/);
     assert.match(text, /Modules: \.js files are CommonJS \(no "type": "module"\), which covers `eslint\.config\.js`, `metro\.config\.js`; TypeScript source is compiled by its toolchain/);
   });
@@ -208,7 +208,7 @@ test('Where To Look First names the contributing guide and a folder-structure do
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /- `CONTRIBUTING\.md` —/);
     assert.match(text, /- `docs\/folder-structure\.md` —/);
     assert.doesNotMatch(text, /- `docs\/release\.md` —/);
@@ -219,7 +219,7 @@ test('Apple signing files are listed as credentials, not as ignored build output
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const boundaries = sectionOf(await read(dir, AGENTS), 'Boundaries');
+    const boundaries = sectionOf(await readBriefing(dir), 'Boundaries');
     assert.match(boundaries, /\*\*Credentials\.\*\*[^\n]*\*\.p8[^\n]*\*\.mobileprovision/);
     assert.doesNotMatch(boundaries.match(/\*\*Ignored paths\.\*\*[^\n]*/)?.[0] ?? '', /\*\.p8|mobileprovision/);
   });
@@ -230,7 +230,7 @@ test('the briefing says the hook is local to the machine that ran setup', async 
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
     assert.match(
-      sectionOf(await read(dir, AGENTS), 'Scope'),
+      sectionOf(await readBriefing(dir), 'Scope'),
       /The hook runs only where setup installed it[^\n]*CI does not run it/,
     );
   });
@@ -261,7 +261,7 @@ test('codegen is run with its diff, never alone, and the generated file is marke
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /api-types \(`npm run api-types`, then fails if `src\/api\/schema\.d\.ts` changed\)/);
     const commands = text.match(/```bash\n([\s\S]*?)```/)?.[1] ?? '';
     assert.match(commands, /^npm run api-types && git diff --exit-code src\/api\/schema\.d\.ts$/m);
@@ -282,7 +282,7 @@ test('a codegen script CI does not check is still marked generated, with no CI c
     await git('add', '-A');
     await git('commit', '-qm', 'init');
     assert.equal((await bare(['--yes'])).code, 0);
-    const boundaries = sectionOf(await read(dir, AGENTS), 'Boundaries');
+    const boundaries = sectionOf(await readBriefing(dir), 'Boundaries');
     assert.match(boundaries, /\*\*Generated files\.\*\* `src\/gql\.ts` is written by `npm run gen`; regenerate it, never edit it by hand\.\n/);
     assert.doesNotMatch(boundaries, /CI fails/);
   });
@@ -308,7 +308,7 @@ test('with an unread include:, scripts outside the jobs NASO read are not called
     await git('add', '-A');
     await git('commit', '-qm', 'chore: SCRUM-3: ci');
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /Declared but not run by CI/);
     assert.match(text, /Not in the jobs NASO could read; the included configuration may run them: `npm run lint`/);
   });
@@ -356,7 +356,7 @@ test('the Scope section says what the hook checks, what it does not, and when it
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const scope = sectionOf(await read(dir, AGENTS), 'Scope').replace(/\s+/g, ' ');
+    const scope = sectionOf(await readBriefing(dir), 'Scope').replace(/\s+/g, ' ');
     // ESLint is configured; Prettier has scripts but no config, and the hook's Format step needs one.
     assert.match(scope, /checks staged files for secret-shaped lines, scope and lint \(ESLint\)/);
     assert.match(scope, /Its format step skips here: there is no Prettier config\./);
@@ -369,7 +369,7 @@ test('a codegen script is named as rewriting the file it generates', async () =>
   await withRepo(async ({ dir, git, bare }) => {
     await seedCustomerApp(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    assert.match(await read(dir, AGENTS), /`npm run api-types` rewrites `src\/api\/schema\.d\.ts`; it is not a check\./);
+    assert.match(await readBriefing(dir), /`npm run api-types` rewrites `src\/api\/schema\.d\.ts`; it is not a check\./);
   });
 });
 
@@ -381,7 +381,7 @@ test('a CONTRIBUTING.md that states commit rules is named as the authority over 
     await git('commit', '-qm', 'docs: SCRUM-9: commits');
     assert.equal((await bare(['--yes'])).code, 0);
     assert.match(
-      sectionOf(await read(dir, AGENTS), 'Commit Standard'),
+      sectionOf(await readBriefing(dir), 'Commit Standard'),
       /`CONTRIBUTING\.md` writes the commit rules down; where it and this count differ, it wins\./,
     );
   });
@@ -398,7 +398,7 @@ test('ignored credential files on this machine are shown at setup by name, and n
     assert.match(res.stdout, /2 credential-shaped files exist on this machine and git ignores them: \.env\.development, \.env\.production/);
     assert.doesNotMatch(res.stdout, /never-read/, 'names only, never contents');
     assert.doesNotMatch(res.stdout, /node_modules\/pkg\/\.env/);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.doesNotMatch(text, /\.env\.development|\.env\.production/, 'a committed briefing makes no claim about one machine');
   });
 });

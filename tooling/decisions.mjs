@@ -293,19 +293,29 @@ export function leadLineIn(text) {
   return text.slice(start, end).split('\n').find((line) => line.startsWith(DECISIONS_LEAD)) ?? null;
 }
 
-/** Bring the lead line in AGENTS.md up to date with the decisions on disk. True when it changed. */
+/**
+ * Bring the line that says where the list is up to date with the decisions on disk, in the
+ * AGENTS.md block and in the decisions guide, wherever it is. True when either changed.
+ */
 export async function refreshDecisionsLead(cwd) {
-  const file = path.join(cwd, 'AGENTS.md');
-  const text = await readFile(file, 'utf8').catch(() => null);
-  const line = text === null ? null : leadLineIn(text);
-  if (line === null) return false;
-  const ours = line.match(LEAD_FORMS)?.[0];
-  if (!ours) return false;
+  let changed = false;
   const next = decisionsLead(await readDecisions(cwd));
-  if (ours === next) return false;
-  // Only NASO's own sentence moves: text a person wrote after it on the same line stays.
-  await writeFile(file, text.replace(line, next + line.slice(ours.length)), 'utf8');
-  return true;
+  // The guide is NASO's file from top to bottom, so its line is found anywhere in it.
+  const targets = [
+    { file: path.join(cwd, 'AGENTS.md'), find: leadLineIn },
+    { file: path.join(cwd, '.naso', 'guides', 'decisions.md'), find: (text) => text.split('\n').find((line) => line.startsWith(DECISIONS_LEAD)) ?? null },
+  ];
+  for (const { file, find } of targets) {
+    const text = await readFile(file, 'utf8').catch(() => null);
+    const line = text === null ? null : find(text);
+    if (line === null) continue;
+    const ours = line.match(LEAD_FORMS)?.[0];
+    if (!ours || ours === next) continue;
+    // Only NASO's own sentence moves: text a person wrote after it on the same line stays.
+    await writeFile(file, text.replace(line, next + line.slice(ours.length)), 'utf8');
+    changed = true;
+  }
+  return changed;
 }
 
 const indexLine = (record) =>
@@ -578,7 +588,7 @@ async function reportSync(cwd) {
   if (outcome === 'updated') console.log(`Updated ${file}.`);
   if (outcome === 'appended') console.log(`Added the list of decisions at the end of ${file}, between NASO markers.`);
   if (outcome === 'locked') console.log(`${file} is locked by another writer; run ${nasoCommand()} decisions sync after.`);
-  if (outcome !== 'locked' && (await refreshDecisionsLead(cwd))) console.log(`Updated the line in AGENTS.md that says where the list is.`);
+  if (outcome !== 'locked' && (await refreshDecisionsLead(cwd))) console.log('Updated the line that says where the list is.');
 }
 
 /**

@@ -146,3 +146,44 @@ Every extra is opt-in, so a default setup loads exactly what Phase 2 loads: naso
 
 `stats` now counts each skill's front matter. The hook output is not a file, so it is
 estimated from its length (102 characters with an empty NOW).
+
+## Phase 4: the layered block (2.0.0, unreleased)
+
+The block keeps what every session needs and routes the rest, through a When You Touch
+table, to guides in `.naso/guides/` that load only when a task needs one. Area lines lost
+their file counts and the root-file list is gone. Same repositories, same commits, regenerated
+with `--force`. "Guides" is what the guides would cost if all of them were read; nothing reads
+them at session start.
+
+| Repository | Baseline | Phase 2 | Phase 4 | Change from baseline | Block lines (text) | Guides | Guides, tokens |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| changesets/changesets | 1,911 | 2,094 | 1,321 | −590 (−31%) | 80 (45) | 3 | 1,070 |
+| psf/requests | 1,490 | 1,635 | 849 | −641 (−43%) | 73 (39) | 3 | 890 |
+| spf13/cobra | 1,506 | 1,647 | 759 | −747 (−50%) | 70 (38) | 3 | 889 |
+| BurntSushi/ripgrep | 1,701 | 1,843 | 902 | −799 (−47%) | 74 (42) | 4 | 1,099 |
+| google/gson | 1,696 | 1,838 | 796 | −900 (−53%) | 59 (32) | 2 | 1,062 |
+| terraform-aws-modules/terraform-aws-vpc | 1,314 | 1,456 | 718 | −596 (−45%) | 57 (30) | 3 | 882 |
+| naso-dev | 1,670 | 1,812 | 965 | −705 (−42%) | 76 (42) | 3 | 999 |
+| field repository, as generated | 1,576 | 2,115 | 1,214 | −362 (−23%) | 81 (46) | 3 | 1,019 |
+| field repository, as reviewed, after `briefing migrate --write` | 4,583 | — | **1,335** | −3,248 (−71%) | 69 | 4 | 3,590 |
+
+Median of the seven samples: 1,670 → **849** (−49%), against 1,812 at Phase 2. "Block lines" is
+every line between the markers, and in brackets the lines of text, without blank lines and HTML
+comments; `briefing` gives a notice past 60 of those, and no sample is near it.
+
+- **cobra** is measured with an empty NOW, as at Phase 2: the clone still holds the 65-token
+  sample NOW from Phase 1, so the 823 that `stats` prints there is 759 plus that sample.
+- **changesets** keeps the largest block because of its rules section (CODEOWNERS) and its
+  validation commands, both of which every session needs.
+- **The reviewed field briefing** is the committed `AGENTS.md` of the field repository,
+  migrated in a scratch clone. Every section moved word for word; what stays at session start
+  is what its reviewers wrote about the areas, the secrets and when work is done. It predates
+  1.6.0, so it has no Read First or rules section yet; adding them is review's job. The 3,590
+  tokens moved into guides are read when a task
+  needs them: 2,178 of them are conventions and commands, 740 workflow, 372 decisions and 300
+  the source map of `apps/`.
+- **Reading a guide costs what it did before** when the task needs it. A session that commits
+  reads `workflow.md` (417–700 tokens as generated here, 740 in the reviewed field repository;
+  gson's includes its merge request checklist); one that only reads code never does. The
+  decisions guide is 362–369 tokens everywhere, the fixed text the baseline found in every
+  sample.

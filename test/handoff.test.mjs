@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import { withRepo, put, read, exists, naso, seedProject, driveFlow, BIN } from './helpers.mjs';
+import { withRepo, put, read, exists, naso, seedProject, driveFlow, BIN, readBriefing } from './helpers.mjs';
 import { FIXTURES, withFixture } from './fixtures/matrix.mjs';
 import {
   locateHandoff,
@@ -293,10 +293,10 @@ test('setup writes the handoff, and the briefing says to read it first and keep 
     assert.equal(located.where, 'git', 'a local setup keeps the handoff out of the working tree');
     assert.ok(await readFile(located.file, 'utf8'));
 
-    const agents = await read(dir, 'AGENTS.md');
+    const agents = await readBriefing(dir);
     const readFirst = agents.slice(agents.indexOf('## Read First'));
     assert.match(readFirst, /1\. The handoff's NOW section/);
-    assert.match(readFirst, /2\. This briefing/);
+    assert.match(readFirst, /2\. This block, then the guide When You Touch names/);
     assert.match(readFirst, /3\. .*[Dd]ecisions/);
     assert.match(readFirst, /handoff set/);
     assert.match(readFirst, /handoff log/);
@@ -313,7 +313,7 @@ test('with --track the handoff is in .naso/ and the briefing names the file', as
     const res = await driveFlow(dir, { args: ['--yes', '--no-hook', '--track'] });
     assert.equal(res.code, 0, res.stderr);
     assert.ok(await exists(dir, '.naso/HANDOFF.md'));
-    assert.match(await read(dir, 'AGENTS.md'), /`\.naso\/HANDOFF\.md`/);
+    assert.match(await readBriefing(dir), /`\.naso\/HANDOFF\.md`/);
     const check = await naso(['briefing', dir, 'check'], dir);
     assert.equal(check.code, 0, check.stdout + check.stderr);
   });

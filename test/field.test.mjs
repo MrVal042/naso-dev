@@ -13,7 +13,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { BIN, AGENTS, exec, withRepo, read, seedFieldRepo } from './helpers.mjs';
+import { BIN, AGENTS, exec, withRepo, read, seedFieldRepo, readBriefing } from './helpers.mjs';
 
 const naso = (dir, args) => exec(process.execPath, [BIN, ...args], dir);
 
@@ -25,7 +25,7 @@ async function fieldState(dir, git, bare) {
   // A teammate's toolset upgrade that package.json never followed.
   await writeFile(path.join(dir, '.naso/tooling/VERSION'), '1.5.1\n');
   // A quote from CONTRIBUTING.md line 8, cited as line 12.
-  const text = await read(dir, AGENTS);
+  const text = await readBriefing(dir);
   await writeFile(
     path.join(dir, AGENTS),
     text.replace('## When This Block Is Wrong', '## When This Block Is Wrong\n\n- Reverts: “Revert messages are accepted as git writes them.” (`CONTRIBUTING.md` line 12)'),
@@ -87,7 +87,7 @@ test('field: briefing reports the misquote and the version gap in the right dire
     // Every fact setup derived passes its own check: the misquote is the only problem.
     assert.doesNotMatch(res.stdout, /MISSING|UNCOVERED/);
     // The block carries what agents had to add by hand, and none of what they removed.
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /Format: Prettier configured by `\.prettierrc`: printWidth 100, singleQuote true, trailingComma "all"/);
     assert.match(text, /runtimeVersion uses the appVersion policy/);
     assert.match(text, /## Merge Request Checklist/);

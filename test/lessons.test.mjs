@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { withRepo, put, read, exists, naso, seedProject, driveFlow } from './helpers.mjs';
+import { withRepo, put, read, exists, naso, seedProject, driveFlow, readBriefing } from './helpers.mjs';
 import { FIXTURES, withFixture } from './fixtures/matrix.mjs';
 import { locateLessons } from '../tooling/lessons.mjs';
 
@@ -99,7 +99,7 @@ test('the briefing links the lessons index, never the lessons, and says how to r
     await driveFlow(dir, { args: ['--yes', '--no-hook', '--track'] });
     await lesson(dir, '--title', 'A lesson with a long body', '--why', 'Secret detail that must stay out of the briefing.', '--apply', 'x');
     await driveFlow(dir, { args: ['--yes', '--no-hook', '--track', '--force'] });
-    const agents = await read(dir, 'AGENTS.md');
+    const agents = await readBriefing(dir);
     assert.match(agents, /`\.naso\/lessons\/README\.md`/);
     assert.match(agents, /lesson --title/);
     assert.doesNotMatch(agents, /Secret detail/);

@@ -210,6 +210,14 @@ export async function treeHash(dir) {
 
 export const plainStyleForTest = new Proxy({}, { get: () => (text) => String(text) });
 export const read = (dir, relPath) => readFile(path.join(dir, relPath), 'utf8');
+
+/** AGENTS.md followed by every guide its block links: what the briefing says, wherever it says it. */
+export async function readBriefing(dir) {
+  const text = await read(dir, AGENTS);
+  const guides = [...new Set([...text.matchAll(/`(\.naso\/guides\/[^`\s]+\.md)`/g)].map((match) => match[1]))];
+  const bodies = await Promise.all(guides.map((rel) => read(dir, rel).catch(() => '')));
+  return [text, ...bodies].join('\n\n');
+}
 export const exists = (dir, relPath) => pathExists(path.join(dir, relPath));
 
 /** A repository with one real area, a package manifest and a git history. */

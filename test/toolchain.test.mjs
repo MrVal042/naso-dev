@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { BIN, AGENTS, FAKE_ESLINT, exec, withRepo, put, read, seedProject, seedFieldRepo, sectionOf } from './helpers.mjs';
+import { BIN, AGENTS, FAKE_ESLINT, exec, withRepo, put, read, seedProject, seedFieldRepo, sectionOf, readBriefing } from './helpers.mjs';
 
 const naso = (dir, args) => exec(process.execPath, [BIN, ...args], dir);
 
@@ -81,7 +81,7 @@ test('the Feature To Folder Map lists only folders whose name says what they hol
     await git('add', '-A');
     await git('commit', '-qm', 'features');
     assert.equal((await bare(['--yes'])).code, 0);
-    assert.doesNotMatch(await read(dir, AGENTS), /Feature To Folder Map/, 'names and counts only: no table');
+    assert.doesNotMatch(await readBriefing(dir), /Feature To Folder Map/, 'names and counts only: no table');
   });
   await withRepo(async ({ dir, git, bare }) => {
     await seedProject(dir, git);
@@ -89,7 +89,7 @@ test('the Feature To Folder Map lists only folders whose name says what they hol
     await git('add', '-A');
     await git('commit', '-qm', 'features');
     assert.equal((await bare(['--yes'])).code, 0);
-    const map = sectionOf(await read(dir, AGENTS), 'Feature To Folder Map');
+    const map = sectionOf(await readBriefing(dir), 'Feature To Folder Map');
     assert.match(map, /\| Components \| `src\/features\/components\/` \| user interface \|/);
     assert.doesNotMatch(map, /Auth|\d+ files?/);
   });
@@ -101,18 +101,18 @@ test('a fresh clone gets the hook from one command, named the same in the block,
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes', '--track'])).code, 0);
-    const scope = sectionOf(await read(dir, AGENTS), 'Scope').replace(/\s+/g, ' ');
+    const scope = sectionOf(await readBriefing(dir), 'Scope').replace(/\s+/g, ' ');
     assert.match(scope, /a fresh clone has none until someone runs `npx naso-dev refresh` there/);
     assert.doesNotMatch(scope, /until setup runs there/);
 
     // A teammate's clone: everything tracked is there, the hook is not.
     await rm(path.join(dir, '.git/hooks/pre-commit'));
-    const before = { agents: await read(dir, AGENTS), lib: await read(dir, '.naso/tooling/lib.mjs'), config: await read(dir, '.naso/config.json') };
+    const before = { agents: await readBriefing(dir), lib: await read(dir, '.naso/tooling/lib.mjs'), config: await read(dir, '.naso/config.json') };
     assert.match((await script('doctor')).stdout, /WARN\s+pre-commit hook\s+missing; install it with `npx naso-dev refresh`/);
     const res = await naso(dir, ['refresh']);
     assert.equal(res.code, 0, res.stdout);
     assert.match(await read(dir, '.git/hooks/pre-commit'), /naso/i);
-    assert.deepEqual({ agents: await read(dir, AGENTS), lib: await read(dir, '.naso/tooling/lib.mjs'), config: await read(dir, '.naso/config.json') }, before, 'at the same version nothing else changes');
+    assert.deepEqual({ agents: await readBriefing(dir), lib: await read(dir, '.naso/tooling/lib.mjs'), config: await read(dir, '.naso/config.json') }, before, 'at the same version nothing else changes');
   });
 });
 
@@ -169,7 +169,7 @@ test('setup derives the toolchain facts agents had to add by hand, each cited, a
     await seedFieldRepo(dir, git);
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     const conventions = sectionOf(text, 'Code Conventions');
     assert.match(conventions, /Format: Prettier configured by `\.prettierrc`: printWidth 100, singleQuote true, trailingComma "all"; every other option is Prettier's default\./);
     assert.match(conventions, /Jest \(`package\.json` "jest"\): preset `jest-expo`; moduleNameMapper mocks `\\\.svg\$` → `<rootDir>\/__mocks__\/svgMock\.js`\./);

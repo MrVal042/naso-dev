@@ -6,14 +6,14 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { withRepo, put, read, naso, seedProject, driveFlow } from './helpers.mjs';
+import { AGENTS, withRepo, put, read, naso, seedProject, driveFlow } from './helpers.mjs';
 
 /** Set up, then cut the Read First section out of the block, as a 1.5.x block would be. */
 async function oldShapeBlock(dir, git, args = []) {
   await seedProject(dir, git);
   const res = await driveFlow(dir, { args: ['--yes', '--no-hook', ...args] });
   assert.equal(res.code, 0, res.stdout + res.stderr);
-  const text = await read(dir, 'AGENTS.md');
+  const text = await read(dir, AGENTS);
   const start = text.indexOf('## Read First');
   const end = text.indexOf('\n## ', start + 1);
   assert.ok(start !== -1 && end !== -1);
@@ -67,8 +67,8 @@ test('after the agent pastes what review gave it, the check passes with no notic
     await oldShapeBlock(dir, git);
     const prompt = (await naso(['review', dir], dir)).stdout;
     const section = prompt.slice(prompt.indexOf('## Read First'), prompt.indexOf('\n```', prompt.indexOf('## Read First')));
-    const text = await read(dir, 'AGENTS.md');
-    const at = text.indexOf('## Which Document Wins');
+    const text = await read(dir, AGENTS);
+    const at = text.indexOf('## When This Block Is Wrong');
     await put(dir, 'AGENTS.md', `${text.slice(0, at)}${section.trim()}\n\n${text.slice(at)}`);
     const res = await naso(['briefing', dir, 'check'], dir);
     assert.equal(res.code, 0, res.stdout);
@@ -83,7 +83,7 @@ async function oldShapeWithTraps(dir, git) {
   await git('add', '-A');
   await git('commit', '-qm', 'env template');
   await driveFlow(dir, { args: ['--yes', '--no-hook'] });
-  const text = await read(dir, 'AGENTS.md');
+  const text = await read(dir, AGENTS);
   const start = text.indexOf('## Rules That Are Easy To Get Wrong');
   const end = text.indexOf('\n## ', start + 1);
   assert.ok(start !== -1 && end !== -1, 'the fresh block has the section');
@@ -114,8 +114,9 @@ test('review gives the rules section to add, and after pasting it the check has 
     const at = prompt.indexOf('## Rules That Are Easy To Get Wrong');
     const section = prompt.slice(at, prompt.indexOf('\n```', at));
     assert.match(section, /`\.env\.example` is committed/);
-    const text = await read(dir, 'AGENTS.md');
-    const where = text.indexOf('## Decisions');
+    const text = await read(dir, AGENTS);
+    // Right after When This Block Is Wrong, where review says: the next section is When You Touch.
+    const where = text.indexOf('## When You Touch');
     await put(dir, 'AGENTS.md', `${text.slice(0, where)}${section.trim()}\n\n${text.slice(where)}`);
     const res = await naso(['briefing', dir, 'check'], dir);
     assert.equal(res.code, 0, res.stdout);

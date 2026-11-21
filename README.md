@@ -53,10 +53,10 @@ A first run in a NestJS API with a `package.json`, shortened. Your branch, count
 ```text
 $ npx naso-dev@latest --save-dev
 Need to install the following packages:
-naso-dev@1.6.0
+naso-dev@2.0.0
 Ok to proceed? (y) y
 
-NASO 1.6.0  /path/to/acme-api
+NASO 2.0.0  /path/to/acme-api
 
 ## This repository
 
@@ -100,7 +100,10 @@ The plan for acme-api  nothing is written until you accept
 
 ## Files this writes
 
-  AGENTS.md                new, 152 lines   (the briefing)
+  AGENTS.md                new, 73 lines    (the briefing)
+  .naso/guides/conventions.md  new, 24 lines  (read when the block says so, not at session start)
+  .naso/guides/workflow.md     new, 31 lines  (read when the block says so, not at session start)
+  .naso/guides/decisions.md    new, 15 lines  (read when the block says so, not at session start)
   CLAUDE.md                new, 1 line      (makes Claude Code load the briefing)
   .naso/tooling/           new, 11865 lines (21 files; the hook runs this copy)
   .naso/config.json        new, 8 lines     (the choices you made here)
@@ -110,7 +113,7 @@ The plan for acme-api  nothing is written until you accept
   package.json             changed  (devDependencies, by npm, last)
   package-lock.json        changed  (by npm, with node_modules/)
 
-  Last, `npm install --save-dev naso-dev@1.6.0`, the only step that uses the network.
+  Last, `npm install --save-dev naso-dev@2.0.0`, the only step that uses the network.
 
 ◆  Write these files and install the hook?
    ● Accept (write exactly the files listed above)
@@ -132,7 +135,7 @@ The plan for acme-api  nothing is written until you accept
 ✓ eslint.config.mjs: added .naso/ to its ignores, so ESLint leaves the toolset alone
 ✓ pre-commit hook: installed (.git/hooks/pre-commit)
 ✓ git: .naso/ and AGENTS.md are yours to commit (--track)
-✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@1.6.0`
+✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.0`
 
 ## Verify
 
@@ -210,6 +213,35 @@ npx naso-dev --yes --save-dev
 
 The two commands this replaces still work, print one deprecation line naming `npx naso-dev`, and are no longer listed in `--help`. Existing scripts and CI jobs calling them keep working.
 
+## The block and its guides
+
+Every line in `AGENTS.md` is read at the start of every session, before the agent does any work. Most of a briefing is needed only for one kind of task: how commits are written matters when committing, a folder's source map when changing that folder, the decisions procedure when a decision comes up. So since 2.0.0 the NASO block keeps what every session needs, and a **When You Touch** table names the guide in `.naso/guides/` to read for each kind of task:
+
+| When you | Read first |
+| --- | --- |
+| write or change code | `.naso/guides/conventions.md` |
+| start editing, commit, or open a pull request | `.naso/guides/workflow.md` |
+| propose an approach, or before asking the person a question | `.naso/guides/decisions.md` |
+| change files under `src/` | `.naso/guides/src.md` |
+
+- **The block:** what the repository is, Read First (the handoff, then the guide for the task), the rules that are easy to get wrong, the areas, secrets, the validation commands and when the work is done. About 30 to 45 lines of text in the sample repositories; `briefing` gives a notice past 60.
+- **The guides:** conventions (code conventions, stack rules, boundaries), workflow (scope, the commit standard, the merge request checklist), decisions, and one per area whose folders a doc describes. A guide with nothing to say is not written, and the table has no row for it.
+- **Checked as one.** `npx naso-dev briefing` reads every guide the block links and checks its paths, quotes and claims as if they were in the block. A linked guide that is missing fails the check, even where `.naso/` is kept out of git.
+- **Edited like the block.** A guide people changed is kept by `--force` and replaced only with `--discard-edits`, after a backup.
+- **Gone:** file counts on every area line, and the list of every root file. `ls` gives both, fresh.
+
+What an agent loads at session start, in estimated tokens (`npx naso-dev stats`; [docs/benchmarks.md](docs/benchmarks.md) has the method and every row):
+
+| | 1.5.4 | 1.6.0 | 2.0.0 |
+| --- | ---: | ---: | ---: |
+| Median of seven public and sample repositories | 1,670 | 1,812 | **849** (−49% from 1.5.4) |
+| A field repository, as generated | 1,576 | 2,115 | **1,214** |
+| The same repository, as its team reviewed it | 4,583 | — | **1,335** after `briefing migrate` |
+
+The guides cost nothing until a task needs one; `stats` lists them apart with their size.
+
+**A block from before 2.0.0** still passes `briefing`, with a notice. `npx naso-dev briefing migrate` shows how it splits, and `--write` moves each section into its guide word for word, every line people wrote in it included. A section NASO does not know stays in the block and is named, and a guide already on disk is never replaced. `review` tells the agent to migrate before anything else.
+
 ## What the briefing says the repository is
 
 The briefing opens with one line, **What this is**, read from the manifests the repository has, in any ecosystem: package.json, pyproject.toml and requirements files, go.mod, Cargo.toml, Gemfile, pom.xml and Gradle, composer.json, pubspec.yaml. Every manifest counts, not only the root one, so a monorepo names each package by its own:
@@ -248,7 +280,7 @@ The block leaves out what changes nothing an agent does: no language mix, no res
 
 ## Decisions: say it once
 
-A decision made in a meeting, a ticket, an email or a chat is lost to the next AI session, the next account and the next agent unless it is written where all of them look. NASO keeps each one in its own file, lists them all in the decisions folder's `README.md` (one line per decision, linked to its record), and gives AGENTS.md only the rules and one link to that list, so AGENTS.md stays the same size however many decisions a team makes.
+A decision made in a meeting, a ticket, an email or a chat is lost to the next AI session, the next account and the next agent unless it is written where all of them look. NASO keeps each one in its own file, lists them all in the decisions folder's `README.md` (one line per decision, linked to its record), and gives the briefing only the rules and one link to that list, in the decisions guide the block routes to, so AGENTS.md stays the same size however many decisions a team makes.
 
 ```bash
 npx naso-dev decide --title "Use REST for the customer API" \
@@ -267,7 +299,7 @@ npx naso-dev decisions audit           # what no longer holds; changes nothing
 - **Every record has a source**, by reference: "PO email, 2026-10-14", not the email.
 - **Say it once.** `decide` refuses a title that is already recorded unless the new record supersedes it, and warns when another record already cites the same line, whether by line, range (`lines 5-9`) or section (`docs/architecture.md section 2`). `--considered` keeps the options turned down, so no later session offers one again. Cite a doc as `--source "<file> line <n>"`.
 - **Short file names.** A long title is cut at the last hyphen before 50 characters, never mid-word.
-- **Every session uses them.** AGENTS.md tells an agent to check the list before asking the person a question, and to record a decision made in the session before the session ends.
+- **Every session uses them.** Read First sends the agent to the decisions for the paths it changes, and the decisions guide tells it to check the list before asking the person a question, and to record a decision made in the session before the session ends.
 - **Nothing is deleted.** The audit reports contradictions, missing sources, scopes that are gone, unsettled proposals and passed review dates; a person supersedes or rejects.
 - **One list, one link.** The list sits between `<!-- naso:decisions:start -->` and `<!-- naso:decisions:end -->` in the decisions folder's `README.md`, accepted first, then proposed, then rejected or superseded; anything the team writes around the markers is kept. These commands and the pre-commit hook refresh it, and the hook stages it with the records. AGENTS.md links to it and tells every agent to read it before proposing an approach, so Claude Code, Codex, Cursor or Copilot start from the same decisions in a new session, on a new account or on another machine.
 
@@ -276,6 +308,7 @@ npx naso-dev decisions audit           # what no longer holds; changes nothing
 | Path                        | Purpose                                                                                          |
 | --------------------------- | ------------------------------------------------------------------------------------------------ |
 | `AGENTS.md`                 | The briefing, inside its `naso:start` / `naso:end` markers. Never overwritten outside them.     |
+| `.naso/guides/*.md`         | The detail behind the block, one guide per kind of task, read when the block's When You Touch table says so. Written with the block, checked with it, and kept like it when people edit one. |
 | `CLAUDE.md`                 | One `@AGENTS.md` line, so Claude Code (which reads `CLAUDE.md`, not `AGENTS.md`) loads the briefing. Written only when there is no `CLAUDE.md` or yours is untracked; a tracked one is left alone unless you pass `--track`, and setup says what to add. |
 | `.naso/tooling/*.mjs`       | A copy of the toolset, so the hook works with no network and no global install. Each file starts with `/* eslint-disable */`, so your lint rules do not apply to NASO's code. |
 | `.dockerignore`             | One `.naso/` line under its own comment, only when the file already exists, so a Docker build does not copy the toolset into the image. Docker does not read `.git/info/exclude`. |
@@ -295,7 +328,7 @@ Git never copies `.git/hooks`, so a fresh clone has no hook. Where `.naso/` is c
 | Command                                                            | What it does                                                                                                     |
 | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
 | `npx naso-dev [target] [options]`                                   | The setup flow: read, plan, ask, write. No TTY and no `--yes` prints the plan, writes nothing, exits 2.           |
-| `npx naso-dev briefing [target] [check\|create\|refresh]`           | Verify `AGENTS.md` against disk (paths, areas, and the claims it can test), write the NASO block, or move the version stamps only. A block written before a section existed (Read First, 1.6.0) passes with a notice, and `review` says what to add. A reviewed block is never replaced without `--discard-edits`. |
+| `npx naso-dev briefing [target] [check\|create\|refresh\|migrate]`  | Verify `AGENTS.md` and the guides it links against disk (paths, areas, and the claims it can test), write the NASO block and its guides, or move the version stamps only. `migrate` shows how a block from before 2.0.0 splits into guides, and `migrate --write` moves the sections word for word. A block written before a section existed (Read First, 1.6.0) passes with a notice, and `review` says what to add. A reviewed block or guide is never replaced without `--discard-edits`. |
 | `npx naso-dev refresh [target]`                                     | Re-copy the toolset, re-stamp the briefing, reinstall the hook; on a fresh clone, the command that installs the hook. Refuses to move a newer toolset back without `--force`, and says when `package.json` records a different naso-dev, with the exact command in the right direction. Never rewrites other briefing prose or `.naso/config.json`. |
 | `npx naso-dev review [target]`                                     | Print the prompt for your coding agent, built from this repository as it is now: its rule files, the check, decisions waiting for a person, and whether the block was reviewed before. |
 | `npx naso-dev guide <area-or-prefix> [target]`                      | The guide for one area: its paths, its checks, its boundary rules, and a ready-to-paste `NASO_SCOPE`.            |
@@ -309,7 +342,7 @@ Git never copies `.git/hooks`, so a fresh clone has no hook. Where `.naso/` is c
 | `npx naso-dev lesson --title … --why … --apply … [--type …]`       | Record what a session learned: a correction, or an approach somebody confirmed. Writes one file per lesson (front matter `name`, `description`, `type` of feedback, project or reference; then **Why:** and **How to apply:**) and one line in the lessons index, which the briefing links; the lessons themselves are read only when their line applies. Kept beside the handoff: `.naso/lessons/` with `--track`, the git directory otherwise, shared by every worktree. A second lesson with the same title is refused. |
 | `npx naso-dev lessons [audit] [target]`                            | Print the lessons index. `audit` reports a lesson citing a path that no longer exists (an error, exit 1), and lessons that duplicate or contradict each other (warnings). It changes nothing. |
 | `npx naso-dev claude [target] [--deny [--owners @a,@b] [--scope a,b]] [--hooks] [--skills]` | Claude Code extras, each opt-in. `--deny` writes `permissions.deny` Edit rules to `.claude/settings.local.json` (kept out of git) for every path outside your CODEOWNERS ownership, or outside `NASO_SCOPE`: GitHub, GitLab (sections, default owners) and Bitbucket patterns are read with gitignore semantics, last match wins, a pattern it cannot translate exactly denies nothing and is reported, and a folder is one rule only when nothing under it could ever be yours. `--hooks`: SessionStart prints the handoff's NOW and the briefing check; Stop reminds the agent once to update the handoff when files changed and it did not (exec form, no shell, exit 0 always; needs the vendored toolset). `--skills`: `naso-handoff`, `naso-pre-pr`, `naso-decide`, `naso-sweep` in `.claude/skills/`. Your own settings, rules and skills are kept. Deny rules cover Claude Code's file tools and the shell commands it recognises, not a script that writes files itself. |
-| `npx naso-dev stats [target] [--json]`                              | What an agent loads at session start, in estimated tokens (4 characters each): `CLAUDE.md` and every file it imports, `AGENTS.md`, and the handoff's NOW section, each counted once, with the largest sections. Reads only; needs no git and no manifest. The numbers NASO is held to are in [docs/benchmarks.md](docs/benchmarks.md). |
+| `npx naso-dev stats [target] [--json]`                              | What an agent loads at session start, in estimated tokens (4 characters each): `CLAUDE.md` and every file it imports, `AGENTS.md`, and the handoff's NOW section, each counted once, with the largest sections, and the guides the block links listed apart, because they are read only when a task needs one. Reads only; needs no git and no manifest. The numbers NASO is held to are in [docs/benchmarks.md](docs/benchmarks.md). |
 
 All commands accept `--help`. `init` and `setup` are retired but still run; both are covered by the test suite.
 

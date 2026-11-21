@@ -34,6 +34,7 @@ import {
   topLevelEntries,
 } from './scan.mjs';
 import { deriveTraps, TRAPS_HEADING } from './traps.mjs';
+import { ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
 
 // ---------------------------------------------------------------------------
 // Checking
@@ -366,6 +367,38 @@ export const SECTIONS_SINCE = [
   },
 ];
 
+/**
+ * Notices about the block's shape: a block from before 2.0.0 that keeps every section in
+ * AGENTS.md, and a root block grown past its budget. Neither is a failure: the block is still
+ * true, it only costs every session more than it has to.
+ */
+export function layoutNotices(block, guides) {
+  const out = [];
+  const layered = new RegExp(`^##\\s+${escapeRegExp(TOUCH_HEADING)}\\s*$`, 'm').test(block) || guides.length > 0;
+  if (!layered) {
+    const movable = splitSections(block).sections.filter((entry) => TOPICS.some((topic) => topic.sections.includes(entry.heading)));
+    if (movable.length > 0) {
+      out.push({
+        kind: 'single-file',
+        heading: TOUCH_HEADING,
+        since: '2.0.0',
+        text: `Single-file block from before 2.0.0: ${movable.map((entry) => entry.heading).join(', ')} load in every session. \`${nasoCommand()} briefing migrate\` moves them into guides, word for word.`,
+      });
+    }
+    return out;
+  }
+  const lines = block.split('\n').filter((line) => line.trim() !== '' && !/^<!--.*-->$/.test(line.trim())).length;
+  if (lines > ROOT_LINE_BUDGET) {
+    out.push({
+      kind: 'over-budget',
+      heading: TOUCH_HEADING,
+      since: '2.0.0',
+      text: `The block is ${lines} lines of text, past the ${ROOT_LINE_BUDGET} every session can afford. Move detail that only one kind of task needs into the guide that ${TOUCH_HEADING} names for it.`,
+    });
+  }
+  return out;
+}
+
 /** The SECTIONS_SINCE entries a NASO block lacks and this repository would have. Text outside the markers does not count. */
 export async function missingSections(block, cwd) {
   const missing = [];
@@ -389,7 +422,13 @@ export async function checkBriefing(cwd) {
   // paths failed a fresh setup on every repository whose own AGENTS.md used backticks.
   const start = briefing.indexOf(NASO_START);
   const end = briefing.indexOf(NASO_END);
-  const claimed = start !== -1 && end > start ? briefing.slice(start, end) : briefing;
+  const hasBlock = start !== -1 && end > start;
+  const block = hasBlock ? briefing.slice(start, end) : briefing;
+  // The guides the block links are part of its claim: every path and quote in them is checked
+  // as if it were in the block. A linked guide that is not on disk is MISSING even where .naso/
+  // is git-ignored, because the block sends the agent to it.
+  const guides = hasBlock ? await readLinkedGuides(cwd, block) : [];
+  const claimed = [block, ...guides.filter((guide) => guide.text !== null).map((guide) => guide.text)].join('\n\n');
   const tokens = extractPathTokens(claimed);
   const entries = await listTopLevelEntries(cwd);
 
@@ -400,12 +439,13 @@ export async function checkBriefing(cwd) {
   // A git-ignored path is generated, not invented: `src/gen/` is real once the build runs.
   // Reporting it as missing pushed briefing writers to drop true facts.
   const ignored = await ignoredPaths(cwd, absent);
-  const missing = absent.filter((token) => !ignored.includes(token));
+  const lostGuides = guides.filter((guide) => guide.text === null).map((guide) => guide.rel);
+  const missing = [...new Set([...absent.filter((token) => !ignored.includes(token)), ...lostGuides])];
 
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
-  const notices = start !== -1 && end > start ? await missingSections(claimed, cwd) : [];
+  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layoutNotices(block, guides)] : [];
 
   const markerCounts = MARKERS.map((marker) => ({
     marker,
@@ -424,6 +464,7 @@ export async function checkBriefing(cwd) {
     ok: problems.length === 0,
     agentsPath,
     briefing,
+    guides,
     tokens,
     entries: entries ?? [],
     ignored,
@@ -473,9 +514,10 @@ export function printCheck(result) {
   }
 
   if (result.notices?.length > 0) {
-    section(`NOTICES (${result.notices.length}) — this block predates a section; not a failure`);
+    section(`NOTICES (${result.notices.length}) — the block is still true; not a failure`);
     for (const item of result.notices) {
-      console.log(`- ${item.heading} missing (added in ${item.since}): ${item.why}. \`${nasoCommand()} review\` says what to add, inside the markers.`);
+      if (item.text) console.log(`- ${item.text}`);
+      else console.log(`- ${item.heading} missing (added in ${item.since}): ${item.why}. \`${nasoCommand()} review\` says what to add, inside the markers.`);
     }
     console.log('');
   }

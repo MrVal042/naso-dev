@@ -9,6 +9,7 @@ import path from 'node:path';
 import { parseArgs } from '../tooling/lib.mjs';
 import { ruleSources } from '../tooling/review.mjs';
 import { blockEdited } from '../tooling/scan.mjs';
+import { guideEdited } from '../tooling/guides.mjs';
 import { BIN, AGENTS, exec, withRepo, put, read, exists, seedProject, sectionOf } from './helpers.mjs';
 
 const naso = (dir, args) => exec(process.execPath, [BIN, ...args], dir);
@@ -62,11 +63,13 @@ test('the first decision updates the line saying where the list is, without coun
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    assert.match(sectionOf(await read(dir, AGENTS), 'Decisions'), /No decision is recorded yet/);
+    const guide = '.naso/guides/decisions.md';
+    assert.match(sectionOf(await read(dir, guide), 'Decisions'), /No decision is recorded yet/);
     assert.equal((await naso(dir, ['decide', '--title', 'Use REST', '--decision', 'REST.', '--source', 'kickoff'])).code, 0);
-    const text = await read(dir, AGENTS);
+    const text = await read(dir, guide);
     assert.match(sectionOf(text, 'Decisions'), /The list is `docs\/decisions\/README\.md`/);
-    assert.equal(blockEdited(text), false, 'NASO moving its own line is not a review');
+    assert.equal(guideEdited(text), false, 'NASO moving its own line is not a review');
+    assert.equal(blockEdited(await read(dir, AGENTS)), false);
     assert.equal((await script('briefing')).code, 0);
   });
 });
@@ -134,8 +137,10 @@ test('review prints a prompt built from this repository: its rule files, its che
     assert.match(first.stdout, /Owners: CODEOWNERS/);
     assert.match(first.stdout, /`npx naso-dev briefing` passes today: \d+ path claims verified/);
     assert.match(first.stdout, /Decisions: 0 accepted, 1 proposed and waiting for a person/);
-    assert.match(first.stdout, /remove what does not earn its place/);
-    assert.match(first.stdout, /Never run git add, commit,\n\s+stash, reset or checkout/);
+    assert.match(first.stdout, /Keep, correct or remove each one/);
+    assert.match(first.stdout, /Never run git add, commit, stash, reset or checkout/);
+    assert.match(first.stdout, /and of the guides it links in \.naso\/guides\//);
+    assert.match(first.stdout, /keep it under 60 lines of text/);
     assert.match(first.stdout, /"What NASO gives this repository"/);
 
     const text = await read(dir, AGENTS);
@@ -160,8 +165,10 @@ test('the briefing tells every session to record decisions and to correct a wron
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
     const text = await read(dir, AGENTS);
-    assert.match(sectionOf(text, 'Decisions'), /Before asking the person a question, check the list/);
-    assert.match(sectionOf(text, 'Decisions'), /record it before the session ends/);
+    const decisions = sectionOf(await read(dir, '.naso/guides/decisions.md'), 'Decisions');
+    assert.match(decisions, /Before asking the person a question, check the list/);
+    assert.match(decisions, /record it before the session ends/);
+    assert.match(sectionOf(text, 'When You Touch'), /`\.naso\/guides\/decisions\.md`/, 'the block routes decisions to their guide');
     assert.match(sectionOf(text, 'When This Block Is Wrong'), /do not work around it silently/);
     assert.match(sectionOf(text, 'When This Block Is Wrong'), /`npx naso-dev review`/);
   });
@@ -186,11 +193,13 @@ test('a decision update keeps what a person wrote after NASO\'s sentence on the 
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    const text = await read(dir, AGENTS);
+    // Since 2.0.0 the line is in the decisions guide, which `decide` keeps current like the block.
+    const guide = '.naso/guides/decisions.md';
+    const text = await read(dir, guide);
     const lead = text.split('\n').find((line) => line.startsWith('Decisions the team already made'));
-    await writeFile(path.join(dir, AGENTS), text.replace(lead, `${lead} Record 0001 lives in customer-api.`));
+    await writeFile(path.join(dir, guide), text.replace(lead, `${lead} Record 0001 lives in customer-api.`));
     assert.equal((await naso(dir, ['decide', '--title', 'Use REST', '--decision', 'REST.', '--source', 'kickoff'])).code, 0);
-    assert.match(await read(dir, AGENTS), /The list is `docs\/decisions\/README\.md`: one line per decision, linked to its record\. Record 0001 lives in customer-api\./);
+    assert.match(await read(dir, guide), /The list is `docs\/decisions\/README\.md`: one line per decision, linked to its record\. Record 0001 lives in customer-api\./);
     assert.equal((await script('briefing')).code, 0);
   });
 });
@@ -310,8 +319,9 @@ test('the check reports a decision count the list no longer bears out', async ()
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
     assert.equal((await naso(dir, ['decide', '--title', 'Use REST', '--decision', 'REST.', '--source', 'kickoff'])).code, 0);
-    const text = await read(dir, AGENTS);
-    await writeFile(path.join(dir, AGENTS), text.replace('\n- Before proposing an approach', '\nAll 6 there are proposed.\n\n- Before proposing an approach'));
+    const guide = '.naso/guides/decisions.md';
+    const text = await read(dir, guide);
+    await writeFile(path.join(dir, guide), text.replace('\n- Before proposing an approach', '\nAll 6 there are proposed.\n\n- Before proposing an approach'));
     const res = await script('briefing');
     assert.equal(res.code, 1);
     assert.match(res.stdout, /Decisions: says "All 6", and the list has 1/);

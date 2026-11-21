@@ -30,6 +30,7 @@ import {
   plannedWrites,
   linesIn,
   answerRealQuestions,
+  readBriefing,
 } from './helpers.mjs';
 
 test('with no terminal and no --yes: the plan is printed, nothing is written, exit 2 names --yes and --dry-run', async () => {
@@ -64,14 +65,14 @@ test('bare --yes writes the briefing exactly as the retired setup command would'
 
     const viaBare = await bare(['--yes']);
     assert.equal(viaBare.code, 0, viaBare.stdout + viaBare.stderr);
-    const fromBare = await read(dir, AGENTS);
+    const fromBare = await readBriefing(dir);
 
     await rm(path.join(dir, AGENTS), { force: true });
     await rm(path.join(dir, '.naso'), { recursive: true, force: true });
 
     const viaSetup = await script('setup', ['--yes']);
     assert.equal(viaSetup.code, 0, viaSetup.stdout + viaSetup.stderr);
-    const fromSetup = await read(dir, AGENTS);
+    const fromSetup = await readBriefing(dir);
 
     // Same bytes, so the two paths cannot drift apart as they are maintained.
     assert.equal(fromBare, fromSetup);
@@ -84,7 +85,7 @@ test('answering the questions and accepting writes the briefing, the toolset and
     const res = await driveFlow(dir, { decisions: ['accept'] });
     assert.equal(res.code, 0, res.stdout + res.stderr);
     assert.deepEqual(res.events.map((event) => event.ask), ['questions', 'decide']);
-    assert.match(await read(dir, AGENTS), /naso:start/);
+    assert.match(await readBriefing(dir), /naso:start/);
     assert.ok(await isVendored(dir), 'the toolset must be vendored');
     assert.ok(isNasoHook({ body: await read(dir, '.git/hooks/pre-commit') }), 'the hook must be installed');
   });
@@ -256,7 +257,7 @@ test('setup excluding an area keeps it out of the briefing and remembers why', a
     assert.equal(res.code, 0, res.stdout + res.stderr);
     assert.match(res.stdout, /vendor/);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(!/\bvendor\//.test(text), 'the excluded area should not be described');
 
     const config = JSON.parse(await read(dir, path.join('.naso', 'config.json')));
@@ -267,7 +268,7 @@ test('setup excluding an area keeps it out of the briefing and remembers why', a
     assert.equal(again.code, 0, again.stdout + again.stderr);
     const config2 = JSON.parse(await read(dir, path.join('.naso', 'config.json')));
     assert.deepEqual(config2.exclude, ['vendor'], 'a saved exclusion must survive a later run');
-    assert.ok(!/\bvendor\//.test(await read(dir, AGENTS)));
+    assert.ok(!/\bvendor\//.test(await readBriefing(dir)));
   });
 });
 
@@ -291,7 +292,7 @@ test('setup leaves a hand-written AGENTS.md alone and appends instead', async ()
     const res = await script('setup', ['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
 
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(text.startsWith(mine));
     assert.match(res.stdout, /[Aa]ppend/);
   });
@@ -392,7 +393,7 @@ test('--exclude given twice keeps both areas out and saves both', async () => {
     assert.equal(res.code, 0, res.stdout + res.stderr);
     const config = JSON.parse(await read(dir, '.naso/config.json'));
     assert.deepEqual(config.exclude, ['a', 'b']);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(!text.includes('`a/`') && !text.includes('`b/`'), 'neither excluded area may be described');
   });
 });
@@ -424,7 +425,7 @@ test('no user@host string appears in any output or any written file', async () =
     }
     const config = JSON.parse(await read(dir, '.naso/config.json'));
     assert.ok(!('generatedBy' in config), 'config.json must not carry generatedBy');
-    assert.ok(!/generated-by:/.test(await read(dir, AGENTS)), 'the AGENTS.md header must not carry generated-by');
+    assert.ok(!/generated-by:/.test(await readBriefing(dir)), 'the AGENTS.md header must not carry generated-by');
   });
 });
 
@@ -499,7 +500,7 @@ test('a hand-written AGENTS.md is not "already set up": the NASO block is append
     await put(dir, AGENTS, '# Ours\n\nHand-written.\n');
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.ok(text.startsWith('# Ours\n\nHand-written.\n'));
     assert.ok(text.includes(NASO_START), 'the block must be appended');
   });
@@ -509,20 +510,20 @@ test('a NASO-owned re-run is reported without --force and regenerates only the b
   await withRepo(async ({ dir, git, bare }) => {
     await seedProject(dir, git);
     assert.equal((await bare(['--yes'])).code, 0);
-    await put(dir, AGENTS, `# Mine\n\nKeep me.\n\n${await read(dir, AGENTS)}`);
+    await put(dir, AGENTS, `# Mine\n\nKeep me.\n\n${await readBriefing(dir)}`);
     await put(dir, 'docs/guide.md', '# Guide\n');
     await git('add', 'docs/guide.md');
     await git('commit', '-qm', 'docs', '--no-verify');
-    const before = await read(dir, AGENTS);
+    const before = await readBriefing(dir);
 
     const again = await bare(['--yes']);
     assert.equal(again.code, 0);
     assert.match(again.stdout, /Already set up/);
-    assert.equal(await read(dir, AGENTS), before, 'without --force nothing changes');
+    assert.equal(await readBriefing(dir), before, 'without --force nothing changes');
 
     const forced = await bare(['--yes', '--force']);
     assert.equal(forced.code, 0, forced.stdout + forced.stderr);
-    const after = await read(dir, AGENTS);
+    const after = await readBriefing(dir);
     assert.ok(after.startsWith('# Mine\n\nKeep me.\n\n'), 'prose outside the markers survives');
     assert.match(after, /`docs\/`/, 'the regenerated block describes the new area');
     assert.ok(isNasoHook({ body: await read(dir, '.git/hooks/pre-commit') }), 'NASO\'s hook is reinstalled');
@@ -616,7 +617,7 @@ test('excluding an area at the question re-plans without counting as a rejection
     const decides = res.events.filter((event) => event.ask === 'decide');
     assert.deepEqual(decides.map((event) => event.rejections), [0, 0]);
     assert.deepEqual(JSON.parse(await read(dir, '.naso/config.json')).exclude, ['docs']);
-    assert.ok(!(await read(dir, AGENTS)).includes('`docs/`'));
+    assert.ok(!(await readBriefing(dir)).includes('`docs/`'));
   });
 });
 
@@ -670,18 +671,18 @@ test('answering yes to the block question regenerates it; no leaves AGENTS.md by
     await put(dir, 'docs/guide.md', '# Guide\n');
     await git('add', 'docs/guide.md');
     await git('commit', '-qm', 'docs', '--no-verify');
-    const before = await read(dir, AGENTS);
+    const before = await readBriefing(dir);
 
     const kept = await driveFlow(dir, { questions: { force: false }, decisions: ['accept'] });
     // Keeping a block that predates docs/ is allowed, and the verification says it is stale.
     assert.equal(kept.code, 1, kept.stdout + kept.stderr);
     assert.match(kept.stdout, /UNCOVERED \(1\)[\s\S]*- docs\//);
     assert.equal(kept.events[0].hasBlock, true, 'a set-up repository reaches the questions in a terminal');
-    assert.equal(await read(dir, AGENTS), before, '"no" must leave the briefing exactly as it was');
+    assert.equal(await readBriefing(dir), before, '"no" must leave the briefing exactly as it was');
 
     const replaced = await driveFlow(dir, { questions: { force: true }, decisions: ['accept'] });
     assert.equal(replaced.code, 0, replaced.stdout + replaced.stderr);
-    assert.match(await read(dir, AGENTS), /`docs\/`/, '"yes" regenerates the block from the repository as it is');
+    assert.match(await readBriefing(dir), /`docs\/`/, '"yes" regenerates the block from the repository as it is');
   });
 });
 
@@ -819,6 +820,6 @@ test('setup warns about machine and runtime files that are tracked, and keeps th
     const res = await bare(['--yes']);
     assert.match(res.stdout, /3 machine or runtime files are tracked in git/);
     assert.match(res.stdout, /\.DS_Store/);
-    assert.doesNotMatch(await read(dir, AGENTS), /machine or runtime files/);
+    assert.doesNotMatch(await readBriefing(dir), /machine or runtime files/);
   });
 });

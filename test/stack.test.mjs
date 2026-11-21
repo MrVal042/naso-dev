@@ -4,7 +4,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENTS, withRepo, put, read, sectionOf } from './helpers.mjs';
+import { AGENTS, withRepo, put, read, sectionOf, readBriefing } from './helpers.mjs';
 
 async function seed(dir, git, files) {
   for (const [name, text] of Object.entries(files)) await put(dir, name, text);
@@ -20,7 +20,7 @@ async function briefingOf(files, args = ['--yes']) {
     assert.equal(res.code, 0, res.stdout + res.stderr);
     const check = await script('briefing');
     assert.equal(check.code, 0, `every path the stack section names must exist:\n${check.stdout}${check.stderr}`);
-    text = await read(dir, AGENTS);
+    text = await readBriefing(dir);
   });
   return text;
 }

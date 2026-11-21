@@ -4,7 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { documentedBranchPattern } from '../tooling/lib.mjs';
-import { AGENTS, withRepo, put, read, sectionOf, exec } from './helpers.mjs';
+import { AGENTS, withRepo, put, read, sectionOf, exec, readBriefing } from './helpers.mjs';
 
 async function seed(dir, git, files) {
   for (const [name, text] of Object.entries(files)) await put(dir, name, text);
@@ -20,7 +20,7 @@ async function briefingOf(files) {
     assert.equal(res.code, 0, res.stdout + res.stderr);
     const check = await script('briefing');
     assert.equal(check.code, 0, `every path claimed must exist:\n${check.stdout}${check.stderr}`);
-    text = await read(dir, AGENTS);
+    text = await readBriefing(dir);
   });
   return text;
 }
@@ -58,8 +58,10 @@ test('which document wins: the default, plus every line the repository wrote abo
   assert.match(wins, /`CONTRIBUTING\.md` line 3: “If this file and the README disagree, this file wins\.”/);
 });
 
-test('a repository with no precedence lines still gets the one-line default', async () => {
-  const wins = sectionOf(await briefingOf(base), 'Which Document Wins');
+test('a repository with no precedence lines still gets the one-line default, opening the correction section', async () => {
+  const text = await briefingOf(base);
+  assert.doesNotMatch(text, /## Which Document Wins/, 'one line needs no heading of its own');
+  const wins = sectionOf(text, 'When This Block Is Wrong');
   assert.match(wins, /Where this block and a file people wrote disagree, the file wins/);
   assert.doesNotMatch(wins, /line \d+:/);
 });
@@ -98,7 +100,7 @@ test('the briefing states the documented branch pattern and the gate checks it',
     await seed(dir, git, { ...base, 'CONTRIBUTING.md': '## Branches\n\nName branches `<type>/<KEY>-<n>-<slug>`.\n' });
     assert.equal((await bare(['--yes'])).code, 0);
     // Stated once, with its reason, among the rules that are easy to get wrong.
-    const agents = await read(dir, AGENTS);
+    const agents = await readBriefing(dir);
     assert.match(sectionOf(agents, 'Rules That Are Easy To Get Wrong'), /Name branches `<type>\/<KEY>-<n>-<slug>` \(`CONTRIBUTING\.md` line 3\); NASO's pre-commit hook warns on any other\./);
     assert.doesNotMatch(sectionOf(agents, 'Commit Standard'), /Branch names/, 'said once, not twice');
 
@@ -130,9 +132,9 @@ test('the source map covers every folder in the source root, with purposes from 
     ].join('\n'),
   });
   const map = sectionOf(text, 'Source Map');
-  assert.match(map, /^\| `src\/api\/` \| 2 files \| the HTTP client and generated types \(`docs\/folder-structure\.md`\) \|$/m);
-  assert.match(map, /^\| `src\/auth\/` \| 1 file \| session, tokens and the app lock \(`docs\/folder-structure\.md`\) \|$/m);
-  assert.match(map, /^\| `src\/theme\/` \| 1 file \| no doc describes it \|$/m);
+  assert.match(map, /^\| `src\/api\/` \| the HTTP client and generated types \(`docs\/folder-structure\.md`\) \|$/m);
+  assert.match(map, /^\| `src\/auth\/` \| session, tokens and the app lock \(`docs\/folder-structure\.md`\) \|$/m);
+  assert.match(map, /^\| `src\/theme\/` \| no doc describes it \|$/m);
   assert.match(map, /Two folders share a name: `src\/auth\/` and `src\/features\/auth\/`\./);
   assert.match(map, /`docs\/folder-structure\.md` names src\/store\/, which is not in the repository\./);
 });

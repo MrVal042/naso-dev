@@ -28,6 +28,7 @@ import {
   read,
   exists,
   seedProject,
+  readBriefing,
 } from './helpers.mjs';
 
 test('notableAdditions proposes directories only, never a root file', () => {
@@ -239,7 +240,7 @@ test('a new area gets one line in the briefing; a new root file does not', async
     const res = await git('commit', '-m', 'add an area and a root config');
 
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    const text = await read(dir, AGENTS);
+    const text = await readBriefing(dir);
     assert.match(text, /workers\//, 'the new area should be noted');
     assert.ok(!/vitest\.config/.test(text), 'a new root file is not an area');
   });

@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.0.0
+
+### Breaking
+
+- **The NASO block is layered: a root every session reads, and guides read when a task needs one.** The block keeps what every session needs (what the repository is, Read First, the rules that are easy to get wrong, the areas, secrets, the validation commands, when the work is done) and a **When You Touch** table that names a guide in `.naso/guides/` for each kind of task: `conventions.md` (Code Conventions, Stack Rules, Boundaries), `workflow.md` (Scope, Commit Standard, Merge Request Checklist), `decisions.md` (Decisions), and one per area whose folders a doc describes (its Source Map or Feature To Folder Map). A guide with nothing to say is not written and gets no row. Anything that reads those sections from `AGENTS.md` alone, or edits them there, now finds them in the guide the table names.
+- **`briefing` checks the guides with the block.** Every guide the block links is read, and its paths, quotes, citations and claims are checked as if they were in the block. A linked guide that is not on disk is MISSING, even where `.naso/` is git-ignored, because the block sends the agent to it. A block from before 2.0.0 still passes, with a notice that names the sections loading in every session and the command that splits them.
+- **Area lines carry no file count, and the root files are not listed.** "`docs/` — documentation; 10 files" went stale with every commit and no agent used it; `ls` gives both fresh. The line keeps what `ls` cannot say: the area's role, its manifest and its entry point, and the root keeps the entry-point sentence.
+- **Which Document Wins is a heading only when the repository has lines to quote.** With none, its one sentence opens When This Block Is Wrong.
+
+### Added
+
+- **`naso-dev briefing migrate`** shows how a block from before 2.0.0 splits into guides, and `--write` does it: each section moves word for word with every line people wrote in it and its sub-sections, the table is added before Project Structure, and NASO's own two Read First lines that named sections in the block are updated. A section whose heading NASO does not know stays in the block and is named. A guide already on disk is never replaced; the run stops and writes nothing. An untouched block keeps reading as untouched; a reviewed one keeps reading as reviewed, and its guides carry no digest, so nothing regenerates over them. `review` tells the agent to migrate before anything else.
+- **Guides are edited like the block.** Each carries a digest. `--force` keeps a guide people changed, and `--discard-edits` replaces it after saving it under `.naso/backups/`. `decide` and `decisions sync` keep the line saying where the list is current in the decisions guide, and that is not counted as an edit.
+- **The block has a budget.** `briefing` gives a notice when the block passes 60 lines of text, saying to move detail into the guide the table names for it. `review` asks the agent to keep it under that.
+- **`stats` lists the guides apart**, with their size, as read when a task needs one; they are not counted in the session-start total. `--json` has them as `onDemand`.
+- **Setup's plan lists every guide** with its line count, before anything is written. `guide <area>` points to the area's guide, and `guide --tour` walks the guides' sections with the block's.
+
+### Changed
+
+- **The review prompt is shorter** (its fixed text is 19% smaller), covers the guides, and asks for the block to stay under 60 lines.
+- **What an agent loads at session start halves.** Same repositories, same commits (`docs/benchmarks.md`): the median of seven goes from 1,670 tokens (1.5.4) and 1,812 (1.6.0) to 849, 49% below 1.5.4. The field repository's generated briefing goes from 2,115 to 1,214, and its reviewed briefing, migrated, from 4,583 to 1,335. The guides add nothing until a task needs one.
+
 ## 1.6.0
 
 ### Added

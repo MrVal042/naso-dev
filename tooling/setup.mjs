@@ -59,7 +59,8 @@ import {
   renderRootFiles,
   describeEntry,
   scanWarnings,
-  renderBriefing,
+  renderLayers,
+  planGuides,
   appendBlock,
   plural,
   NASO_START,
@@ -369,7 +370,9 @@ function claudePlanEntry(claude) {
 const TRACKED_AGENTS_NOTE =
   'AGENTS.md is tracked in git already, and an exclude line cannot hide a tracked file: the ' +
   'NASO block shows in git status as a change to AGENTS.md. Commit it to share the briefing, ' +
-  'or `git checkout -- AGENTS.md` to drop it.';
+  'or `git checkout -- AGENTS.md` to drop it. The guides it links in .naso/guides/ stay on this ' +
+  'machine, so a teammate\'s `briefing` reports them MISSING: re-run with --track to commit them ' +
+  'with it.';
 
 /**
  * Everything step 2 knows, computed once.
@@ -528,7 +531,7 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
   // Every file this run writes, with the exact line count of what lands there. Computed
   // from the same renderers the write uses, so the preview is the write, not a summary.
   const now = new Date().toISOString().slice(0, 10);
-  const block = await renderBriefing(facts, { version, now });
+  const { block, guides } = await renderLayers(facts, { version, now });
   const writes = [];
   if (!hasAgents) {
     writes.push({ path: 'AGENTS.md', change: 'new', lines: lineCount(block) });
@@ -541,6 +544,17 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
     });
   } else if (force) {
     writes.push({ path: 'AGENTS.md', change: 'replace block', lines: lineCount(block), note: 'only between the markers' });
+  }
+  // The guides are written with the block, and only when it is.
+  if (!hasAgents || !hasBlock || force) {
+    for (const guide of await planGuides(cwd, guides)) {
+      if (guide.change === 'unchanged') continue;
+      writes.push(
+        guide.change === 'kept'
+          ? { path: guide.rel, change: 'kept', lines: 0, note: 'edited after NASO wrote it; --discard-edits replaces it' }
+          : { path: guide.rel, change: guide.change, lines: lineCount(guide.text), note: 'read when the block says so, not at session start' },
+      );
+    }
   }
 
   if (claude.action === 'create' || claude.action === 'append') {
@@ -757,6 +771,7 @@ export async function displayOverview(state, cwd, style = plainStyle) {
 /** "new, 83 lines", "append 5 lines", or "changed" for a file the package manager writes. */
 function sizeText(write) {
   if (write.change === 'by-pm') return 'changed';
+  if (write.change === 'kept') return 'kept as it is';
   if (write.change === 'append' || write.change === 'insert') return `${write.change} ${plural(write.lines, 'line')}`;
   return `${write.change}, ${plural(write.lines, 'line')}`;
 }

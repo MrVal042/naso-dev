@@ -19,6 +19,7 @@ import {
   read,
   exists,
   seedProject,
+  readBriefing,
 } from './helpers.mjs';
 
 test('the README documents the bare command and not the retired pair', async () => {
@@ -309,7 +310,7 @@ test('refresh never edits the briefing prose', async () => {
     await writeFile(path.join(dir, AGENTS), edited, 'utf8');
 
     await script('refresh');
-    const after = await read(dir, AGENTS);
+    const after = await readBriefing(dir);
     assert.ok(after.includes('I reworded this heading myself'), 'refresh overwrote hand-written prose');
   });
 });
@@ -354,12 +355,12 @@ test('refresh says so when AGENTS.md was stamped by a newer NASO, and leaves the
   await withRepo(async ({ dir, git, bare, script }) => {
     await seedProject(dir, git);
     await bare(['--yes']);
-    const text = (await read(dir, AGENTS)).replace(/<!-- version: .+ -->/, '<!-- version: 9.9.9 -->');
+    const text = (await readBriefing(dir)).replace(/<!-- version: .+ -->/, '<!-- version: 9.9.9 -->');
     await put(dir, AGENTS, text);
     const res = await script('refresh');
     assert.match(res.stdout, /stamped 9\.9\.9, newer than this tool/);
     assert.ok(!/already stamped/.test(res.stdout));
-    assert.match(await read(dir, AGENTS), /<!-- version: 9\.9\.9 -->/);
+    assert.match(await readBriefing(dir), /<!-- version: 9\.9\.9 -->/);
   });
 });
 

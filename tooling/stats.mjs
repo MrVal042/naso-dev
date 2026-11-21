@@ -13,6 +13,7 @@ import path from 'node:path';
 import { readFile, realpath, readdir } from 'node:fs/promises';
 import { parseArgs, isMainModule, nasoCommand, toPosixPath, SUPPORT_EMAIL, toolVersion } from './lib.mjs';
 import { locateHandoff, NOW_START, NOW_END } from './handoff.mjs';
+import { linkedGuides } from './guides.mjs';
 
 export { NOW_START, NOW_END };
 
@@ -223,11 +224,18 @@ export async function measureSessionLoad(targetDir) {
     }
   }
   const agentsText = agentsReal ? await readText(agentsFull) : null;
+  // The guides the block links are read when a task needs one, not at session start. They are
+  // listed apart, so the saving is visible and nobody mistakes it for content that went away.
+  const onDemand = [];
   if (agentsText) {
     const start = agentsText.indexOf(NASO_START);
     const end = agentsText.indexOf(NASO_END, start + 1);
     if (start !== -1 && end !== -1) {
       nasoBlock = { tokens: estimateTokens(agentsText.slice(start, end + NASO_END.length)) };
+      for (const rel of linkedGuides(agentsText.slice(start, end))) {
+        const text = await readText(path.join(root, rel));
+        if (text !== null) onDemand.push({ path: rel, lines: countLines(text), tokens: estimateTokens(text) });
+      }
     }
   }
 
@@ -275,6 +283,7 @@ export async function measureSessionLoad(targetDir) {
       tokens: files.reduce((sum, file) => sum + file.tokens, 0),
     },
     nasoBlock,
+    onDemand,
     sections,
     skipped,
   };
@@ -290,7 +299,7 @@ function printLoad(load, version) {
     return;
   }
   console.log(`What an agent loads at session start, estimated at ${CHARS_PER_TOKEN} characters a token.\n`);
-  const width = Math.max(4, ...load.files.map((file) => file.path.length + (file.part === 'whole' ? 0 : file.part.length + 3)));
+  const width = Math.max(4, ...load.files.map((file) => file.path.length + (file.part === 'whole' ? 0 : file.part.length + 3)), ...(load.onDemand ?? []).map((guide) => guide.path.length));
   console.log(`  ${'File'.padEnd(width)}  ${'Lines'.padStart(6)}  ${'Tokens'.padStart(7)}  Why it loads`);
   for (const file of load.files) {
     const label = file.part === 'whole' ? file.path : `${file.path} (${file.part})`;
@@ -300,6 +309,12 @@ function printLoad(load, version) {
   const agents = load.files.find((file) => file.path === 'AGENTS.md');
   if (load.nasoBlock && agents) {
     console.log(`\n  The NASO block is ${n(load.nasoBlock.tokens)} of AGENTS.md's ${n(agents.tokens)} tokens.`);
+  }
+
+  if (load.onDemand?.length > 0) {
+    const total = load.onDemand.reduce((sum, guide) => sum + guide.tokens, 0);
+    console.log(`\nRead when a task needs it, not counted above (${n(total)} tokens in all):`);
+    for (const guide of load.onDemand) console.log(`  ${guide.path.padEnd(width)}  ${n(guide.lines).padStart(6)}  ${n(guide.tokens).padStart(7)}`);
   }
 
   console.log('\nLargest sections');
