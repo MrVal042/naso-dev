@@ -34,7 +34,7 @@ import {
   topLevelEntries,
 } from './scan.mjs';
 import { deriveTraps, TRAPS_HEADING } from './traps.mjs';
-import { ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
+import { GUIDES_DIR, ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
 
 // ---------------------------------------------------------------------------
 // Checking
@@ -494,7 +494,11 @@ export async function checkBriefing(cwd) {
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
-  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layoutNotices(block, guides)] : [];
+  // A single-file block is the right shape where guides could not be committed: migrating
+  // would put its rules where no other clone can read them, so it is not suggested.
+  const guidesLocal = hasBlock && guides.length === 0 && (await localOnlyGuides(cwd, [`${GUIDES_DIR}/decisions.md`])).length > 0;
+  const layout = hasBlock ? layoutNotices(block, guides).filter((notice) => !(guidesLocal && notice.kind === 'single-file')) : [];
+  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layout] : [];
   if (localOnly.length > 0) {
     notices.push({
       kind: 'local-only',

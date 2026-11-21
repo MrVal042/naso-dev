@@ -189,7 +189,7 @@ export async function createBriefing(cwd, { force = false, discardEdits = false,
  * root keeps what every session needs. A guide that is already on disk is never replaced;
  * the run stops and says which. Without `write`, it only says what it would do.
  */
-export async function migrateBriefing(cwd, { write = false } = {}) {
+export async function migrateBriefing(cwd, { write = false, allowLocal = false } = {}) {
   const agentsPath = path.join(cwd, AGENTS_FILE);
   const outcome = await withLock(
     cwd,
@@ -227,6 +227,9 @@ export async function migrateBriefing(cwd, { write = false } = {}) {
         kept: split.kept,
         localOnly: await localOnlyGuides(cwd, split.guides.map((guide) => guide.rel)),
       };
+      // Moving rules where no teammate can read them, then warning, left a committed block
+      // linking files only this machine has. Refuse instead; the block stays in one file.
+      if (write && result.localOnly.length > 0 && !allowLocal) return { ok: false, reason: 'local-only', localOnly: result.localOnly };
       if (!write) return result;
       await writeFile(agentsPath, after, 'utf8');
       await writeGuides(cwd, split.guides);
@@ -310,7 +313,8 @@ Usage:
   ${nasoCommand()} briefing [dir] create --force     replace an existing naso:start/naso:end block
   ${nasoCommand()} briefing [dir] refresh            move the version stamp only
   ${nasoCommand()} briefing [dir] migrate            show how a block from before 2.0.0 splits into guides
-  ${nasoCommand()} briefing [dir] migrate --write    do it: sections move word for word
+  ${nasoCommand()} briefing [dir] migrate --write    do it: sections move word for word; refused when git
+                                                ignores the guides but not AGENTS.md (--local overrides)
 
 Never rewrites anything outside <!-- naso:start --> and <!-- naso:end -->.
 
@@ -396,7 +400,7 @@ export async function main(argv = process.argv.slice(2)) {
 
   if (command === 'migrate') {
     const write = flags.has('write');
-    const result = await migrateBriefing(cwd, { write });
+    const result = await migrateBriefing(cwd, { write, allowLocal: flags.has('local') });
     if (!result.ok) {
       const why = {
         missing: `No ${AGENTS_FILE} in ${cwd}. Run \`${nasoCommand()} setup\` first.`,
@@ -404,6 +408,7 @@ export async function main(argv = process.argv.slice(2)) {
         layered: `The block already links its guides; nothing to migrate.`,
         'guides-exist': `These guides are already on disk and would be replaced: ${(result.taken ?? []).join(', ')}. Move them aside, or merge them into the block by hand first. Nothing was written.`,
         locked: `${AGENTS_FILE} is locked by ${result.holder}; nothing was written.`,
+        'local-only': `Git ignores ${(result.localOnly ?? []).join(', ')}, and ${AGENTS_FILE} is not ignored: the block would reach every clone and the guides none. Nothing was written. Keep the block in one file, or stop excluding .naso/guides/ (its line in .git/info/exclude or .gitignore), migrate, and commit the guides with it. \`--local\` moves them anyway, for this machine only.`,
       }[result.reason];
       console.log(`- ${why}`);
       if (result.reason !== 'layered') process.exitCode = 1;
@@ -416,7 +421,7 @@ export async function main(argv = process.argv.slice(2)) {
     if (result.localOnly.length > 0) {
       console.log(
         `\nGit ignores ${result.localOnly.join(', ')}, and ${AGENTS_FILE} is not ignored: the block would reach every clone and these guides would not. ` +
-          'Commit them with `git add -f`, or leave this block in one file.',
+          '`migrate --write` refuses here; keep the block in one file, or commit .naso/guides/ first.',
       );
     }
     if (result.kept.length > 0) console.log(`Left in the block, because NASO does not know where they belong: ${result.kept.join(', ')}. Move them into a guide by hand if only one kind of task needs them.`);

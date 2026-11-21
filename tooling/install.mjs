@@ -124,6 +124,16 @@ fi
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null) || REPO_ROOT=$(pwd)
 NASO_SCRIPT="$REPO_ROOT/${script}"
 
+# A linked worktree of a repository that keeps ${NASO_DIR}/ out of git has no copy of
+# its own: use the main checkout's, found through the git directory every worktree
+# shares. The checks still run on this worktree's staged files.
+if [ ! -f "$NASO_SCRIPT" ]; then
+  COMMON_DIR=$(cd "$REPO_ROOT" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd)
+  if [ -n "$COMMON_DIR" ] && [ -f "$(dirname "$COMMON_DIR")/${script}" ]; then
+    NASO_SCRIPT="$(dirname "$COMMON_DIR")/${script}"
+  fi
+fi
+
 if [ ! -f "$NASO_SCRIPT" ]; then
   echo "naso-dev: $NASO_SCRIPT is missing - pre-commit checks skipped. Run: ${nasoCommand()} refresh" >&2
   exit 0

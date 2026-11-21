@@ -231,6 +231,25 @@ test('migrate --write moves every line word for word, and the check then has no 
   });
 });
 
+test('with AGENTS.md committed and .naso/ ignored, migrate --write refuses and the check does not suggest it', async () => {
+  await withRepo(async ({ dir, git, bare, script }) => {
+    const old = await singleFileBlock(dir, git, bare);
+    await git('add', '-f', AGENTS);
+    const check = await script('briefing');
+    assert.equal(check.code, 0, check.stdout);
+    assert.doesNotMatch(check.stdout, /Single-file block/);
+
+    const res = await script('briefing', ['migrate', '--write']);
+    assert.equal(res.code, 1, res.stdout);
+    assert.match(res.stdout, /Nothing was written/);
+    assert.equal(await read(dir, AGENTS), old);
+    assert.ok(!(await exists(dir, GUIDE('workflow'))));
+
+    const forced = await script('briefing', ['migrate', '--write', '--local']);
+    assert.ok(await exists(dir, GUIDE('workflow')), forced.stdout);
+  });
+});
+
 test('migrate never replaces a guide that is already on disk', async () => {
   await withRepo(async ({ dir, git, bare, script }) => {
     const old = await singleFileBlock(dir, git, bare);

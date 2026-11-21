@@ -163,3 +163,25 @@ test('a handoff the repository keeps is the one Read First names, and setup writ
     assert.equal(await pathExists(path.join(dir, '.naso', 'HANDOFF.md')), false);
   });
 });
+
+test('the hook runs from a linked worktree of a repository that keeps .naso/ local', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    const setup = await naso([dir, '--yes'], dir);
+    assert.equal(setup.code, 0, setup.stdout + setup.stderr);
+    const wt = await mkdtemp(path.join(os.tmpdir(), 'naso-wt-'));
+    await rm(wt, { recursive: true, force: true });
+    try {
+      await git('worktree', 'add', '-q', wt, '-b', 'feat/x');
+      await put(wt, 'src/extra.js', 'export const x = 1;\n');
+      await exec('git', ['add', 'src/extra.js'], wt);
+      const commit = await exec('git', ['-c', 'user.email=a@b.invalid', '-c', 'user.name=T', 'commit', '-m', 'feat: x'], wt);
+      const out = commit.stdout + commit.stderr;
+      assert.doesNotMatch(out, /pre-commit checks skipped/, out);
+      assert.match(out, /Secrets: PASS/, out);
+    } finally {
+      await rm(wt, { recursive: true, force: true });
+    }
+  });
+});
+
