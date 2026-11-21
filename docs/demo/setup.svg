@@ -3,7 +3,7 @@
 <rect width="1060" height="904" rx="8" fill="#0d1117"/>
 <circle cx="20" cy="18" r="6" fill="#ff5f57"/><circle cx="40" cy="18" r="6" fill="#febc2e"/><circle cx="60" cy="18" r="6" fill="#28c840"/>
 <text class="l0" x="20" y="54" fill="#7ee787" font-weight="bold">$ npx naso-dev --yes</text>
-<text class="l1" x="20" y="74" fill="#e6edf3">NASO 2.0.1  ~/go-cli</text>
+<text class="l1" x="20" y="74" fill="#e6edf3">NASO 2.0.2  ~/go-cli</text>
 <text class="l2" x="20" y="94" fill="#b1bac4">Branch             main</text>
 <text class="l3" x="20" y="114" fill="#b1bac4">Files              9 tracked in the git index</text>
 <text class="l4" x="20" y="134" fill="#b1bac4">Areas              2 top-level directories (cmd, internal)</text>
@@ -16,7 +16,7 @@
 <text class="l11" x="20" y="274" fill="#b1bac4">  .naso/guides/workflow.md        new, 30 lines  (read when the block says so, not at session start)</text>
 <text class="l12" x="20" y="294" fill="#b1bac4">  .naso/guides/decisions.md       new, 15 lines  (read when the block says so, not at session start)</text>
 <text class="l13" x="20" y="314" fill="#b1bac4">  .naso/guides/internal.md        new, 14 lines  (read when the block says so, not at session start)</text>
-<text class="l14" x="20" y="334" fill="#b1bac4">  CLAUDE.md                       new, 5 lines</text>
+<text class="l14" x="20" y="334" fill="#b1bac4">  CLAUDE.md                       new, 7 lines</text>
 <text class="l15" x="20" y="354" fill="#b1bac4">  .naso/tooling/                  new  (30 files; the hook runs this copy)</text>
 <text class="l16" x="20" y="374" fill="#b1bac4">  .naso/config.json               new, 8 lines</text>
 <text class="l17" x="20" y="394" fill="#b1bac4">  .git/naso/HANDOFF.md            new, 35 lines  (the handoff, shared by every worktree)</text>
@@ -34,10 +34,10 @@
 <text class="l29" x="20" y="634" fill="#b1bac4"></text>
 <text class="l30" x="20" y="654" fill="#7ee787" font-weight="bold">$ npx naso-dev stats</text>
 <text class="l31" x="20" y="674" fill="#b1bac4">  File                          Lines   Tokens  Why it loads</text>
-<text class="l32" x="20" y="694" fill="#b1bac4">  CLAUDE.md                         5       34  Claude Code reads it</text>
+<text class="l32" x="20" y="694" fill="#b1bac4">  CLAUDE.md                         7       34  Claude Code reads it</text>
 <text class="l33" x="20" y="714" fill="#b1bac4">  AGENTS.md                        68      714  imported by CLAUDE.md</text>
 <text class="l34" x="20" y="734" fill="#b1bac4">  .git/naso/HANDOFF.md (NOW)        1        1  the handoff NOW section</text>
-<text class="l35" x="20" y="754" fill="#b1bac4">  Total                            74      749</text>
+<text class="l35" x="20" y="754" fill="#b1bac4">  Total                            76      749</text>
 <text class="l36" x="20" y="774" fill="#b1bac4">  The NASO block is 714 of AGENTS.md's 714 tokens.</text>
 <text class="l37" x="20" y="794" fill="#b1bac4">Read when a task needs it, not counted above (993 tokens in all):</text>
 <text class="l38" x="20" y="814" fill="#b1bac4">  .naso/guides/decisions.md        15      362</text>

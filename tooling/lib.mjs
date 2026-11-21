@@ -207,12 +207,40 @@ function fieldManager(field, exists) {
 
 const CONTRIBUTING_FILES = ['CONTRIBUTING.md', '.github/CONTRIBUTING.md', 'docs/CONTRIBUTING.md'];
 
+const TICKET_PLACEHOLDER = /key|ticket|issue|jira/i;
+const NUMBER_PLACEHOLDER = /^(?:n|num|number|id|\d+)$/i;
+
+/**
+ * A branch template as a regex. Most placeholders match one or more characters other than a
+ * slash. A ticket placeholder (`<KEY>`, `<JIRA-KEY>`, `<ticket>`) matches an uppercase key,
+ * `SCRUM` before a number placeholder and `SCRUM-142` otherwise. A number placeholder (`<n>`)
+ * matches digits. With every placeholder free, `<type>/<JIRA-KEY>-<short-name>` passed
+ * `local/preview-1121-0104`, which has no key in it.
+ */
+export function branchTemplateRegex(template) {
+  const parts = template.split(/(<[^>]+>)/).filter((part) => part !== '');
+  const name = (part) => /^<([^>]+)>$/.exec(part)?.[1] ?? null;
+  const pattern = parts
+    .map((part, i) => {
+      const placeholder = name(part);
+      if (placeholder === null) return part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (NUMBER_PLACEHOLDER.test(placeholder)) return '\\d+';
+      if (TICKET_PLACEHOLDER.test(placeholder)) {
+        const numberFollows = parts[i + 1] === '-' && NUMBER_PLACEHOLDER.test(name(parts[i + 2] ?? '') ?? '');
+        return numberFollows ? '[A-Z][A-Z0-9]*' : '[A-Z][A-Z0-9]*-\\d+';
+      }
+      return '[^/\\s]+';
+    })
+    .join('');
+  return new RegExp(`^${pattern}$`);
+}
+
 /**
  * The branch pattern a contributing guide states, as `{ source, text, regex }`, or null.
  *
  * Read from a backticked template with placeholders on a line about branches:
- * `<type>/<KEY>-<n>-<slug>`. Each `<placeholder>` matches one or more characters other than
- * a slash; everything else is literal. A guide with examples only and no template gives
+ * `<type>/<KEY>-<n>-<slug>`. Placeholders match as `branchTemplateRegex` says; everything
+ * else is literal. A guide with examples only and no template gives
  * nothing, because an example does not say which of its parts are fixed. The gate used to
  * accept any `x/y`, which passed every branch a team's own rule would have rejected.
  */
@@ -220,22 +248,49 @@ export async function documentedBranchPattern(cwd) {
   for (const source of CONTRIBUTING_FILES) {
     const text = await readFile(path.join(cwd, source), 'utf8').catch(() => null);
     if (text === null) continue;
+    const lines = text.split('\n');
     let heading = '';
-    for (const line of text.split('\n')) {
+    for (const [index, line] of lines.entries()) {
       if (/^#+\s/.test(line)) heading = line;
       if (!/branch/i.test(line) && !/branch/i.test(heading)) continue;
       for (const match of line.matchAll(/`([^`\s]*<[^`\s]+>[^`\s]*)`/g)) {
         const template = match[1];
         if (!template.includes('/')) continue;
-        const pattern = template
-          .split(/(<[^>]+>)/)
-          .map((part) => (/^<[^>]+>$/.test(part) ? '[^/\\s]+' : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
-          .join('');
-        return { source, text: template, regex: new RegExp(`^${pattern}$`) };
+        const exceptions = branchExceptions(lines, index, template);
+        const main = branchTemplateRegex(template);
+        const regex = exceptions.length === 0 ? main : new RegExp(`(?:${[main, ...exceptions.map((entry) => entry.regex)].map((re) => re.source).join(')|(?:')})`);
+        return { source, text: template, regex, exceptions: exceptions.map((entry) => entry.text) };
       }
     }
   }
   return null;
+}
+
+/** `hotfix/vX.Y.Z`: a branch written with a version template rather than `<placeholders>`. */
+const VERSION_BRANCH = /^[\w.-]+\/[\w.-]*?[vV]?X\.Y(?:\.Z)?[\w.-]*$/;
+
+/**
+ * The other branch templates the same rule allows: on the template's line, and on the lines
+ * after it up to the next heading or blank line, a backticked branch with placeholders or a
+ * version template (`hotfix/vX.Y.Z`). Without them the gate warned on every hotfix branch
+ * the guide itself allowed.
+ */
+function branchExceptions(lines, index, template) {
+  const found = [];
+  for (let i = index; i < lines.length; i++) {
+    const line = lines[i];
+    if (i > index && (/^#+\s/.test(line) || line.trim() === '')) break;
+    for (const match of line.matchAll(/`([^`\s]+)`/g)) {
+      const token = match[1];
+      if (token === template || !token.includes('/') || found.some((entry) => entry.text === token)) continue;
+      if (/<[^>]+>/.test(token)) found.push({ text: token, regex: branchTemplateRegex(token) });
+      else if (VERSION_BRANCH.test(token)) {
+        const pattern = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/X\\\.Y(\\\.Z)?/, (_, z) => `\\d+\\.\\d+${z ? '\\.\\d+' : ''}`);
+        found.push({ text: token, regex: new RegExp(`^${pattern}$`) });
+      }
+    }
+  }
+  return found;
 }
 
 // ---------------------------------------------------------------------------

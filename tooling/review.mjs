@@ -25,7 +25,7 @@ import { AGENTS_FILE, NASO_START, NASO_END, blockEdited, listRepoFiles, scanRepo
 import { renderReadFirst } from './render.mjs';
 import { renderTraps, TRAPS_HEADING } from './traps.mjs';
 import { locateHandoff } from './handoff.mjs';
-import { checkBriefing } from './check.mjs';
+import { checkBriefing, localOnlyGuides } from './check.mjs';
 import { NASO_DIR } from './vendor.mjs';
 import { readDecidedNotes } from './toolchain.mjs';
 import { readDecisions, auditDecisions, indexFileOf, citedLines, sameDecisionText } from './decisions.mjs';
@@ -239,6 +239,9 @@ export async function reviewState(cwd) {
     hook: /naso/i.test((await readFile(path.join(cwd, '.git', 'hooks', 'pre-commit'), 'utf8').catch(() => '')) ?? ''),
     version: await toolVersion(),
     eslintUnignored: await eslintWithoutNaso(cwd, files ?? []),
+    // AGENTS.md reaches every clone and .naso/ does not: the handoff and the guides are this
+    // machine's, so the block must not be the only way to what they hold.
+    nasoLocal: hasBlock && (await localOnlyGuides(cwd, [`${NASO_DIR}/HANDOFF.md`])).length > 0,
     decided: rows.filter((row) => !row.owner),
     decidedElsewhere: rows.filter((row) => row.owner),
   };
@@ -311,12 +314,19 @@ function stateLines(state, cmd, here) {
     );
   }
 
+  if (state.nasoLocal) {
+    lines.push(
+      `- ${AGENTS_FILE} is not ignored here and ${NASO_DIR}/ is, so the block reaches every clone and ${NASO_DIR}/HANDOFF.md and ${GUIDES_DIR}/ reach none. ` +
+        'Keep every rule a teammate needs in the block or in a committed file it links. If the repository already keeps a handoff or a decisions list elsewhere, point to that one, not a second, empty one. Report the choice (commit the guides with `git add -f`, or keep them local) for a person to settle.',
+    );
+  }
+
   if (state.branch) {
     const rule = state.branchPattern;
     lines.push(
       `- You are on branch ${state.branch}.` +
         (rule
-          ? ` \`${rule.source}\` says branches follow \`${rule.text}\`${rule.regex.test(state.branch) ? ', and this one does' : ', and this one does not'}.`
+          ? ` \`${rule.source}\` says branches follow \`${rule.text}\`${rule.exceptions?.length ? ` (or ${rule.exceptions.map((text) => `\`${text}\``).join(', ')})` : ''}${rule.regex.test(state.branch) ? ', and this one does' : ', and this one does not'}.`
           : ' No branch rule is written down that NASO could read; look for one before planning the commit.'),
     );
   }
@@ -332,7 +342,7 @@ function stateLines(state, cmd, here) {
     );
   }
   if (state.decided.length > 0) {
-    lines.push(`- Rows this repository's docs mark Decided that no record cites yet (${state.decided.length}), from Status columns and from lines that say "decided" in config, CONTRIBUTING, CODEOWNERS and docs. Propose each that is a decision, citing the file and line:`);
+    lines.push(`- Rows this repository's docs mark Decided that no record cites yet (${state.decided.length}), from Status columns and from lines that say "decided" in config, CONTRIBUTING, CODEOWNERS and docs. Propose each that is a decision, citing the file and line, unless ${state.decisions.dir}/, its index or the decisions guide says a rule already written in the docs is not proposed again; then propose none, and say which rule stopped you:`);
     for (const row of state.decided.slice(0, 40)) lines.push(`  - ${row.file} line ${row.line}: ${row.text}`);
     if (state.decided.length > 40) lines.push(`  - and ${state.decided.length - 40} more`);
   }
@@ -389,7 +399,8 @@ ${sources.join('\n')}
 3. Audit every line of the NASO block, and of the guides it links in ${GUIDES_DIR}/,
    against those files and the code. Keep, correct or remove each one:
    - Correct what the repository contradicts. Remove what is wrong and cannot be
-     corrected, repeats a linked file, or would not change what an agent does.
+     corrected, repeats a linked file or CLAUDE.md (every Claude Code session
+     loads it too), or would not change what an agent does.
    - Add what an agent would otherwise get wrong: framework rules; generated and
      vendored files and how each is regenerated; import boundaries; protected
      paths and their owners; which commands only check, rewrite files, never

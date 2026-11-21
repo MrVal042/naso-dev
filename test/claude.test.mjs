@@ -305,21 +305,28 @@ test('setup writes no Claude extras unless asked, and writes the ones asked for,
   });
 });
 
-test('in a terminal, setup asks about each extra, Enter answers No, and an owner can be picked', async () => {
+test('in a terminal, setup asks about each extra, Enter answers Yes where it can, and an owner can be picked', async () => {
   const none = { state: 'none' };
   const claude = { owners: ['@ops', '@us'], scope: [] };
   const defaults = await answerRealQuestions({ hook: none, hasBlock: false, claude }, ['\r', '\r', '\r', '\r', '\r']);
+  // Which owner the person is cannot be guessed, so deny rules stay off without NASO_SCOPE.
   assert.equal(defaults.answer.claudeDeny, undefined);
-  assert.equal(defaults.answer.claudeHooks, false);
-  assert.equal(defaults.answer.claudeSkills, false);
+  assert.equal(defaults.answer.claudeHooks, true);
+  assert.equal(defaults.answer.claudeSkills, true);
   assert.match(defaults.frames, /deny edits to paths that are not yours/);
+  assert.match(defaults.frames, /Yes \(recommended\)/);
 
-  // Down twice: past No and @ops, to @us. Then yes to hooks, no to skills.
+  // Down twice from No: wraps to @ops, then @us. Then yes to hooks, no to skills.
   const picked = await answerRealQuestions({ hook: none, hasBlock: false, claude }, ['\r', '\r', '\u001b[B', '\u001b[B', '\r', 'y', 'n']);
   assert.equal(picked.answer.claudeDeny, true);
   assert.deepEqual(picked.answer.owners, ['@us']);
   assert.equal(picked.answer.claudeHooks, true);
   assert.equal(picked.answer.claudeSkills, false);
+
+  // With NASO_SCOPE set, Enter takes it.
+  const scoped = await answerRealQuestions({ hook: none, hasBlock: false, claude: { owners: [], scope: ['src/'] } }, ['\r', '\r', '\r', '\r', '\r']);
+  assert.equal(scoped.answer.claudeDeny, true);
+  assert.deepEqual(scoped.answer.owners, []);
 
   // No CODEOWNERS owners and no scope: the deny question is not asked at all.
   const noOwners = await answerRealQuestions({ hook: none, hasBlock: false, claude: { owners: [], scope: [] } }, ['\r', '\r', '\r', '\r']);

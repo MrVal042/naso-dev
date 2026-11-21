@@ -133,7 +133,10 @@ async function ownersTrap(cwd, files) {
     return contiguous ? `lines ${lines[0]}-${lines.at(-1)}` : `lines ${lines.join(', ')}`;
   };
   const shown = groups.map((group) => `${group.items.map((item) => item.pattern).join(', ')} (${group.owners.join(', ')}, ${linesText(group.items.map((item) => item.line))})`);
-  const more = entries.length > MAX_OWNER_PATTERNS ? ` and ${entries.length - MAX_OWNER_PATTERNS} more` : '';
+  // The rest keep their lines, so the citation covers every owned path: "lines 10-13 and 1
+  // more" pointed at four lines of a five-line rule.
+  const rest = entries.slice(MAX_OWNER_PATTERNS);
+  const more = rest.length > 0 ? ` and ${rest.length} more (${linesText(rest.map((entry) => entry.line))})` : '';
   // A plain path that matches nothing tracked is a rule about a folder that is not there
   // yet, or a typo; either way an agent should not read it as protecting anything.
   const unmatched = entries
@@ -175,7 +178,8 @@ async function branchTrap(cwd) {
   const lines = ((await read(cwd, pattern.source)) ?? '').split('\n');
   const at = lines.findIndex((line) => line.includes(pattern.text));
   const where = at === -1 ? `\`${pattern.source}\`` : `\`${pattern.source}\` line ${at + 1}`;
-  return [`Name branches \`${pattern.text}\` (${where}); NASO's pre-commit hook warns on any other.`];
+  const except = pattern.exceptions?.length ? `, or ${pattern.exceptions.map((text) => `\`${text}\``).join(', ')}` : '';
+  return [`Name branches \`${pattern.text}\`${except} (${where}); NASO's pre-commit hook warns on any other.`];
 }
 
 /** CONTRIBUTING's own words: one ticket per pull request, the merge mode, who may approve, exceptions. */

@@ -112,8 +112,11 @@ export function select({ message, options, initialValue, style = plainStyle, ...
   });
 }
 
-/** Yes or no. `y` and `n` answer at once; arrows move between them and Enter answers. */
-export function confirm({ message, initialValue = true, style = plainStyle, ...io }) {
+/**
+ * Yes or no. `y` and `n` answer at once; arrows move between them and Enter answers.
+ * `recommended` (true or false) marks that answer "(recommended)"; it defaults to the initial value.
+ */
+export function confirm({ message, initialValue = true, recommended = initialValue, style = plainStyle, ...io }) {
   return prompt({
     ...io,
     state: { value: Boolean(initialValue) },
@@ -128,8 +131,9 @@ export function confirm({ message, initialValue = true, style = plainStyle, ...i
       const lines = header(style, message, status);
       const answer = state.value ? 'Yes' : 'No';
       if (status !== 'active') return [...lines, `${style.gray(BAR)}  ${style.dim(answer)}`];
-      const yes = state.value ? `${style.green('●')} Yes` : `${style.dim('○ Yes')}`;
-      const no = state.value ? `${style.dim('○ No')}` : `${style.green('●')} No`;
+      const mark = (answer) => (Boolean(recommended) === answer ? ' (recommended)' : '');
+      const yes = state.value ? `${style.green('●')} Yes${mark(true)}` : `${style.dim(`○ Yes${mark(true)}`)}`;
+      const no = state.value ? `${style.dim(`○ No${mark(false)}`)}` : `${style.green('●')} No${mark(false)}`;
       return [...lines, `${style.cyan(BAR)}  ${yes} ${style.dim('/')} ${no}`, style.cyan('└')];
     },
   });

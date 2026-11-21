@@ -404,7 +404,9 @@ export async function inspect(cwd, { track, noHook, exclude, force = false, hook
   // Where the handoff will be once this run writes it: the --track choice decides, and the
   // config that records it is written after the briefing, so the scan cannot read it yet.
   facts.handoff = await locateHandoff(cwd, { track });
-  const handoffExists = await pathExists(facts.handoff.file);
+  // A handoff the repository keeps already is the one the block names; a second, empty one
+  // in .naso/ would be read instead of it.
+  const handoffExists = Boolean(facts.teamHandoff) || (await pathExists(facts.handoff.file));
   // A CLAUDE.md the repository marks as someone else's is not NASO's to append to, --track
   // or not: the standards it came from would overwrite the line, or a review would refuse it.
   if (claude.action === 'append' || claude.action === 'advise') {
@@ -883,7 +885,7 @@ export async function install(cwd, { track, noHook, force, discardEdits = false,
   const excludedLocally = track ? false : await excludeLocally(cwd, localExcludes);
 
   // Before the briefing: a briefing that names .naso/HANDOFF.md is verified against disk.
-  const handoff = await ensureHandoff(cwd, { track });
+  const handoff = state.facts?.teamHandoff ? { created: false } : await ensureHandoff(cwd, { track });
   if (handoff.created) {
     console.log(ok(`${handoff.located.shown}: wrote the handoff${handoff.located.where === 'git' ? ', in the git directory where every worktree shares it' : ''}`));
   }

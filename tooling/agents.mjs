@@ -36,7 +36,7 @@ export const AGENTS = {
     label: 'Cursor',
     file: '.cursor/rules/naso.mdc',
     own: true,
-    head: '---\ndescription: The repository briefing, AGENTS.md\nalwaysApply: true\n---\n',
+    head: '---\ndescription: The repository briefing, AGENTS.md\nalwaysApply: true\n---\n\n',
     body: POINTER,
     signs: ['.cursor', '.cursorrules'],
     others: { dir: '.cursor/rules', files: ['.cursorrules'] },
@@ -59,7 +59,7 @@ export const AGENTS = {
     label: 'Windsurf',
     file: '.windsurf/rules/naso.md',
     own: true,
-    head: '---\ntrigger: always_on\n---\n',
+    head: '---\ntrigger: always_on\n---\n\n',
     body: POINTER,
     signs: ['.windsurf', '.windsurfrules'],
     others: { dir: '.windsurf/rules', files: ['.windsurfrules'] },
@@ -71,7 +71,9 @@ export const NATIVE = { codex: { label: 'Codex', signs: ['.codex'] } };
 
 export const AGENT_NAMES = Object.keys(AGENTS);
 
-const block = (agent) => `${START}\n${agent.body}\n${END}\n`;
+// Blank lines around the body and after front matter: Prettier puts them there, and a
+// pointer that fails the repository's own `prettier --check` is NASO's noise in its CI.
+const block = (agent) => `${START}\n\n${agent.body}\n\n${END}\n`;
 
 /** The bytes a new pointer file holds. */
 export function pointerContent(agent) {

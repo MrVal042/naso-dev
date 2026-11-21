@@ -67,6 +67,19 @@ const EXTENSIONLESS_FILES = /^(?:Makefile|Dockerfile|Containerfile|LICEN[CS]E|NO
 
 const MARKERS = ['TODO(fill)', 'TODO(describe)'];
 
+/** Commands a block may tell agents to run, and the naso-dev version that added each. */
+export const COMMAND_SINCE = { handoff: '1.6.0', lesson: '1.6.0', lessons: '1.6.0', claude: '1.6.0', stats: '1.6.0', agents: '2.0.0', workspace: '2.0.0' };
+
+/** A version written as a template, `vX.Y.Z` or `x.y`: a placeholder, so never a path on disk. */
+const VERSION_TEMPLATE = /(?:^|[/.-])v?[Xx]\.[Yy](?:\.[Zz])?(?:$|[/.-])/;
+
+/**
+ * Prefixes branch names start with. A token like `feat/SCRUM-12-login` that is not on disk
+ * under one of these is an example branch name, not a missing path; a real `fix/` folder is
+ * still checked, because then the token exists or its first segment does.
+ */
+const BRANCH_PREFIXES = new Set(['feat', 'feature', 'fix', 'bugfix', 'hotfix', 'chore', 'release', 'refactor', 'perf', 'revert']);
+
 /**
  * Remove fenced code blocks before hunting for path claims.
  *
@@ -100,6 +113,8 @@ export function extractPathTokens(text) {
     // where `@/` points was reported as missing the path "@/".
     if (/^[@~#]\//.test(token)) continue;
     if (TOOL_SCRIPT_NAMES.test(token)) continue;
+    // `hotfix/vX.Y.Z` and `release/x.y` name a branch or a version template, not a file.
+    if (VERSION_TEMPLATE.test(token)) continue;
     if (!PATH_SHAPED_TOKEN.test(token)) continue;
     if (!NAMES_A_PATH.test(token) && !EXTENSIONLESS_FILES.test(token)) continue;
     tokens.add(token);
@@ -313,12 +328,39 @@ export async function versionNotes(cwd, claimed) {
         : `The block is stamped ${stamped}, newer than .naso/tooling/ (${vendored}). \`${nasoCommand({ version: stamped })} refresh\` updates the toolset.`,
     );
   }
+  // `npx naso-dev handoff` in the block runs the pinned install, and 1.5.3 answers it with
+  // "unknown command". Said against the pin, because that is what teammates run.
+  if (recorded) {
+    const pinned = recorded.installed ?? recorded.spec.replace(/^[\^~=v]+/, '');
+    const absent = Object.entries(COMMAND_SINCE)
+      .filter(([, since]) => /^\d+\.\d+\.\d+/.test(pinned) && compareVersions(pinned, since) < 0)
+      .map(([name]) => name)
+      .filter((name) => new RegExp(`naso-dev(?:@\\S+)?\\s+${name}\\b`).test(claimed));
+    if (absent.length > 0) {
+      const newest = absent.map((name) => COMMAND_SINCE[name]).sort(compareVersions).at(-1);
+      notes.push(
+        `The block runs ${absent.map((name) => `\`${name}\``).join(', ')}, which package.json's naso-dev ${pinned} does not have (added in ${newest}). ` +
+          `\`${exactDevInstallText(pm, vendored && compareVersions(vendored, newest) >= 0 ? vendored : running)}\` pins one that does.`,
+      );
+    }
+  }
   if (pinGap) {
     notes.push(pinGap);
   } else if (recorded && vendored && /^[\^~]/.test(recorded.spec) && (await pinsExactVersions(cwd, recorded.pkg))) {
     notes.push(`package.json records naso-dev as ${recorded.spec}, and this repository pins exact versions. \`${exactDevInstallText(pm, vendored)}\` pins it.`);
   }
   return notes;
+}
+
+/**
+ * Linked guides git ignores while AGENTS.md is not ignored: the block will be committed and
+ * the guide never will. `migrate` moved sections into .naso/guides/ in a repository that
+ * commits AGENTS.md and excludes .naso/, and the check passed.
+ */
+export async function localOnlyGuides(cwd, rels) {
+  if (rels.length === 0) return [];
+  if ((await ignoredPaths(cwd, [AGENTS_FILE])).length > 0) return [];
+  return ignoredPaths(cwd, rels);
 }
 
 /** The paths among these that .gitignore covers, whether or not they exist yet. */
@@ -434,18 +476,31 @@ export async function checkBriefing(cwd) {
 
   const absent = [];
   for (const token of tokens) {
-    if (!(await pathExists(path.join(cwd, token)))) absent.push(token);
+    if (await pathExists(path.join(cwd, token))) continue;
+    const first = token.split('/')[0];
+    if (token.includes('/') && BRANCH_PREFIXES.has(first) && !(await pathExists(path.join(cwd, first)))) continue;
+    absent.push(token);
   }
   // A git-ignored path is generated, not invented: `src/gen/` is real once the build runs.
   // Reporting it as missing pushed briefing writers to drop true facts.
   const ignored = await ignoredPaths(cwd, absent);
   const lostGuides = guides.filter((guide) => guide.text === null).map((guide) => guide.rel);
   const missing = [...new Set([...absent.filter((token) => !ignored.includes(token)), ...lostGuides])];
+  // A committed block that links a guide git never sees sends every other clone to a file
+  // that is not there. Where AGENTS.md itself is kept out of git, the guides are too, and
+  // that is consistent.
+  const localOnly = hasBlock ? await localOnlyGuides(cwd, guides.filter((guide) => guide.text !== null).map((guide) => guide.rel)) : [];
 
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
   const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layoutNotices(block, guides)] : [];
+  if (localOnly.length > 0) {
+    notices.push({
+      kind: 'local-only',
+      text: `${AGENTS_FILE} is not ignored, so its block reaches every clone, and git ignores the guides it links: ${localOnly.join(', ')}. On any other clone the block points at files that are not there. Commit them (\`git add -f\`), or keep what a teammate needs in the block.`,
+    });
+  }
 
   const markerCounts = MARKERS.map((marker) => ({
     marker,
@@ -471,6 +526,7 @@ export async function checkBriefing(cwd) {
     wrong,
     missing,
     uncovered,
+    localOnly,
     unfilled,
     notes,
     notices,

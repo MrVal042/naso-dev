@@ -361,7 +361,8 @@ async function checkBranchName(cwd) {
     if (/^(main|master|develop|dev|trunk)$/.test(branch) || documented.regex.test(branch)) {
       record('Branch naming', 'pass', `${branch} (${documented.source})`);
     } else {
-      record('Branch naming', 'warn', `${branch} does not follow ${documented.text} (${documented.source}); not blocking`);
+      const allowed = [documented.text, ...(documented.exceptions ?? [])].join(' or ');
+      record('Branch naming', 'warn', `${branch} does not follow ${allowed} (${documented.source}); not blocking`);
     }
   } else if (BRANCH_NAME_PATTERN.test(branch)) {
     record('Branch naming', 'pass', branch);
