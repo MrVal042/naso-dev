@@ -13,6 +13,7 @@
 
 ### Changed
 
+- **The test suite runs on Windows.** `npm test` relied on the shell to expand `test/*.test.mjs`, which cmd.exe does not, so on Node 20 no test ran; and the scripted-flow helper imported `flow.mjs` by a `D:\` path, which the Windows ESM loader rejects, failing 49 tests on Node 22. `npm test` now runs `test/run.mjs`, which lists the files itself. Test-only: NASO's own code is unchanged.
 - The examples and the demo are regenerated with 2.0.3.
 
 ## 2.0.2

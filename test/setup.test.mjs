@@ -717,7 +717,7 @@ test('deps.interactive is called, so an injected "no terminal" really means no t
     await seedProject(dir, git);
     const before = await treeHash(dir);
     const driver = `
-      const { main } = await import(${JSON.stringify(path.join(TOOL_DIR, 'flow.mjs'))});
+      const { main } = await import(${JSON.stringify(pathToFileURL(path.join(TOOL_DIR, 'flow.mjs')).href)});
       const refuse = async () => { throw new Error('asked a question with no terminal'); };
       main([process.argv[1]], {
         interactive: () => false,

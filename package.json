@@ -19,8 +19,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "prepublishOnly": "node --test test/*.test.mjs"
+    "test": "node test/run.mjs",
+    "prepublishOnly": "node test/run.mjs"
   },
   "keywords": [
     "agents",
