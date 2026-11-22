@@ -358,7 +358,9 @@ const INDEX_INTRO =
  * Rewrite the list in the decisions folder's README.md, and nothing outside its markers.
  *
  * Returns `{ outcome, file }`: 'created' (a new README.md), 'updated', 'current', 'appended'
- * (an existing README.md had no markers, so the list went at its end) or 'none' (no records).
+ * (an existing README.md had no markers, so the list went at its end), 'own-list' (it keeps a
+ * list of its own, so nothing is written; `unlisted` holds the records it does not link yet)
+ * or 'none' (no records).
  */
 export async function syncDecisionIndex(cwd) {
   const decisions = await readDecisions(cwd);
@@ -377,6 +379,9 @@ export async function syncDecisionIndex(cwd) {
       const start = text.indexOf(DECISIONS_START);
       const end = text.indexOf(DECISIONS_END);
       if (start === -1 || end === -1 || end < start) {
+        // A README that already links its records is the team's list. A second list under it
+        // said everything twice; the team's own is left as it is, and the gaps are named.
+        if (decisions.records.some((record) => text.includes(`](${path.posix.basename(record.file)})`))) return 'own-list';
         await writeFile(full, `${text}${text.endsWith('\n') ? '' : '\n'}\n${block}\n`, 'utf8');
         return 'appended';
       }
@@ -391,6 +396,11 @@ export async function syncDecisionIndex(cwd) {
     },
     { reason: `refresh the decisions list in ${file}` },
   );
+  if (outcome.ok && outcome.value === 'own-list') {
+    const text = (await readFile(full, 'utf8').catch(() => '')) ?? '';
+    const unlisted = decisions.records.filter((record) => !text.includes(`](${path.posix.basename(record.file)})`));
+    return { outcome: 'own-list', file, unlisted };
+  }
   return { outcome: outcome.ok ? outcome.value : 'locked', file };
 }
 
@@ -583,7 +593,11 @@ export async function auditDecisions(cwd, { on = today() } = {}) {
 const listOf = (value) => (value ? String(value).split(',').map((item) => item.trim()).filter(Boolean) : []);
 
 async function reportSync(cwd) {
-  const { outcome, file } = await syncDecisionIndex(cwd);
+  const { outcome, file, unlisted = [] } = await syncDecisionIndex(cwd);
+  if (outcome === 'own-list' && unlisted.length > 0) {
+    console.log(`${file} keeps its own list, so NASO left it as it is. Add the record${unlisted.length === 1 ? '' : 's'} it does not link yet, in its format:`);
+    for (const record of unlisted) console.log(`  ${record.id} ${record.title} (${path.posix.basename(record.file)})`);
+  }
   if (outcome === 'created') console.log(`Wrote the list of decisions: ${file}.`);
   if (outcome === 'updated') console.log(`Updated ${file}.`);
   if (outcome === 'appended') console.log(`Added the list of decisions at the end of ${file}, between NASO markers.`);

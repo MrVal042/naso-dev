@@ -211,15 +211,47 @@ async function contributingTraps(cwd, files) {
  * own lines in whatever room is left. Each is one line, without its list marker.
  */
 export async function deriveTraps(cwd, files, { pkg = null } = {}) {
+  const said = await claudeLines(cwd);
   const fixed = [
     ...(await decisionTraps(cwd)),
     ...envTrap(files),
     ...(await ownersTrap(cwd, files)),
     ...(await commitlintTrap(cwd, files, pkg)),
-    ...(await branchTrap(cwd)),
+    ...(await branchTrap(cwd)).filter((trap) => !said.some((line) => line.includes(branchTemplateOf(trap) ?? '\0'))),
   ].slice(0, MAX_TRAPS);
   const room = MAX_TRAPS - fixed.length;
-  return [...fixed, ...(room > 0 ? (await contributingTraps(cwd, files)).slice(0, room) : [])];
+  const quoted = (await contributingTraps(cwd, files)).filter((trap) => !alreadySaid(trap.match(/“(.+)”/)?.[1] ?? '', said));
+  return [...fixed, ...(room > 0 ? quoted.slice(0, room) : [])];
+}
+
+/**
+ * CLAUDE.md's own lines, outside NASO's markers: every Claude Code session loads them with
+ * the block, so a rule they state already is not drafted again. One field review cut three
+ * CONTRIBUTING quotes that CLAUDE.md said in other words.
+ */
+async function claudeLines(cwd) {
+  const text = (await read(cwd, 'CLAUDE.md')) ?? '';
+  return text
+    .replace(/<!-- naso:start -->[\s\S]*?<!-- naso:end -->/g, '')
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
+const branchTemplateOf = (trap) => trap.match(/`([^`]*<[^`]+>[^`]*)`/)?.[1] ?? null;
+
+const words = (text) => new Set(String(text).toLowerCase().match(/[a-z0-9][a-z0-9-]{3,}/g) ?? []);
+
+/** Does one line hold at least three quarters of the rule's words? Paraphrase counts; a topic does not. */
+export function alreadySaid(rule, lines) {
+  const wanted = words(rule);
+  if (wanted.size < 3) return false;
+  return lines.some((line) => {
+    const have = words(line);
+    let hit = 0;
+    for (const word of wanted) if (have.has(word)) hit++;
+    return hit / wanted.size >= 0.75;
+  });
 }
 
 /** The section, or null when there is nothing to say. */

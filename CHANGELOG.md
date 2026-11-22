@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.0.3
+
+### Fixed
+
+- **Setup defaults are what NASO recommends, not always Yes.** 2.0.2 answered Yes to every question on Enter. Now Enter answers Yes where it costs the team nothing (the gate, chaining a hook NASO did not write, regenerating an untouched block, recording naso-dev in devDependencies) and No where it would write into what is theirs: a hooks folder git tracks, and the Claude Code hooks and skills. Committing AGENTS.md and `.naso/` defaults to Yes only where AGENTS.md is already tracked; elsewhere setup leaves no trace. Each default is marked (recommended).
+- **No pointer files for agents a repository does not use.** With no Cursor, Copilot, Gemini or Windsurf configuration present, Enter answers No to the pointer question; 2.0.2 wrote all four, `.github/` included on GitLab repositories.
+- **The hook works in every worktree.** In a linked worktree of a repository that keeps `.naso/` local, it runs the main checkout's toolset instead of skipping.
+- **A local `.naso/` holds nothing a teammate needs.** `briefing migrate --write` refuses to move rules into guides git ignores while AGENTS.md is committed (`--local` overrides), and the check no longer suggests migrating there.
+- **Every command the block names runs.** Where package.json pins a naso-dev older than a command (`handoff` and `lesson` arrived in 1.6.0), the block writes `npx naso-dev@<this version>` for it instead of a command the pinned install answers with "unknown command".
+- **No second copy of what a repository has.** A rule CLAUDE.md already states, quoted or in other words, is not drafted into the rules section. A decisions README that keeps its own list is left as it is; `decide` names the records it does not link yet instead of appending a second list.
+
+### Changed
+
+- **The test suite runs on Windows.** `npm test` relied on the shell to expand `test/*.test.mjs`, which cmd.exe does not, so on Node 20 no test ran; and the scripted-flow helper imported `flow.mjs` by a `D:\` path, which the Windows ESM loader rejects, failing 49 tests on Node 22. `npm test` now runs `test/run.mjs`, which lists the files itself. Test-only: NASO's own code is unchanged.
+- The examples and the demo are regenerated with 2.0.3.
+
 ## 2.0.2
 
 ### Added

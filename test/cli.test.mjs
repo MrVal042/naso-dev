@@ -150,8 +150,8 @@ test('package metadata points at the repository and gates a publish on the tests
   assert.match(pkg.repository.url, /github\.com\/MrVal042\/naso-dev\.git$/);
   assert.match(pkg.bugs.url, /github\.com\/MrVal042\/naso-dev\/issues/);
   assert.ok(pkg.homepage.startsWith('https://github.com/MrVal042/naso-dev'));
-  assert.equal(pkg.scripts.prepublishOnly, 'node --test test/*.test.mjs');
-  assert.equal(pkg.scripts.test, 'node --test test/*.test.mjs');
+  assert.equal(pkg.scripts.prepublishOnly, 'node test/run.mjs');
+  assert.equal(pkg.scripts.test, 'node test/run.mjs');
   for (const wanted of ['bin', 'tooling', 'VERSION', 'README.md', 'LICENSE']) {
     assert.ok(pkg.files.includes(wanted), `files is missing ${wanted}`);
   }

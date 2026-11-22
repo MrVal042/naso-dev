@@ -43,7 +43,7 @@ It works like a guided installer. In order:
 - **An existing `AGENTS.md` is never replaced.** The NASO block goes between `<!-- naso:start -->` and `<!-- naso:end -->`; everything outside those markers stays byte-identical.
 - **Nothing is written before the last answer.** Not the hook, not the config, not a half-written briefing.
 
-Arrow keys (or j/k) move between answers, Enter picks one, and y or n answers a yes/no question at once. The default answer is marked (recommended); it is Yes everywhere except Claude Code deny rules without `NASO_SCOPE`, because NASO cannot tell which CODEOWNERS owner you are. Ctrl+C or Escape cancels at any question, and nothing is written.
+Arrow keys (or j/k) move between answers, Enter picks one, and y or n answers a yes/no question at once. The default answer is marked (recommended). Ctrl+C or Escape cancels at any question, and nothing is written.
 
 Add `--why` for the long-form rationale before you decide.
 
@@ -56,10 +56,10 @@ A first run in a NestJS API with a `package.json`, shortened. Your branch, count
 ```text
 $ npx naso-dev@latest --save-dev
 Need to install the following packages:
-naso-dev@2.0.2
+naso-dev@2.0.3
 Ok to proceed? (y) y
 
-NASO 2.0.2  /path/to/acme-api
+NASO 2.0.3  /path/to/acme-api
 
 ## This repository
 
@@ -78,14 +78,14 @@ Before you accept nothing at all is written. Answering no leaves this
                   repository exactly as it is, and that is a valid outcome.
 ```
 
-**2. It asks what the plan depends on.** Enter takes the default, which is Yes, marked (recommended), on every question. `--yes` asks nothing and keeps the flags' defaults: local files, and no extras unless asked for.
+**2. It asks what the plan depends on.** Enter takes the default, marked (recommended): Yes where it costs the team nothing, No where it would write into what is theirs, and for committing, Yes only where AGENTS.md is already tracked. `--yes` asks nothing and keeps the flags' defaults: local files, and no extras unless asked for.
 
 ```text
 ◇  Questions
    Answer with Enter to accept the default. Nothing is written until you accept the plan.
 
 ◇  Commit AGENTS.md and .naso/ to git, so every clone gets the same briefing? (No keeps them local to this machine.)
-   Yes
+   No
 
 ◇  Install the pre-commit gate?
    Yes
@@ -116,7 +116,7 @@ The plan for acme-api  nothing is written until you accept
   package.json             changed  (devDependencies, by npm, last)
   package-lock.json        changed  (by npm, with node_modules/)
 
-  Last, `npm install --save-dev naso-dev@2.0.2`, the only step that uses the network.
+  Last, `npm install --save-dev naso-dev@2.0.3`, the only step that uses the network.
 
 ◆  Write these files and install the hook?
    ● Accept (write exactly the files listed above)
@@ -138,7 +138,7 @@ The plan for acme-api  nothing is written until you accept
 ✓ eslint.config.mjs: added .naso/ to its ignores, so ESLint leaves the toolset alone
 ✓ pre-commit hook: installed (.git/hooks/pre-commit)
 ✓ git: .naso/ and AGENTS.md are yours to commit (--track)
-✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.2`
+✓ devDependencies: added naso-dev with `npm install --save-dev naso-dev@2.0.3`
 
 ## Verify
 

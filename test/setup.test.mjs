@@ -437,7 +437,8 @@ test('a foreign hook is named in the plan, kept byte for byte, and setup still w
 
     const res = await bare(['--yes']);
     assert.equal(res.code, 0, res.stdout + res.stderr);
-    assert.match(res.stdout, /Hook: existing hook at \S*\.git\/hooks\/pre-commit/);
+    // The path is the platform's own: backslashes on Windows.
+    assert.match(res.stdout, /Hook: existing hook at \S*\.git[\\/]hooks[\\/]pre-commit/);
     assert.ok(await exists(dir, AGENTS), 'a foreign hook must not stop the briefing being written');
     assert.equal(await read(dir, '.git/hooks/pre-commit'), FOREIGN_HOOK, 'the foreign hook must be untouched');
   });
@@ -717,7 +718,7 @@ test('deps.interactive is called, so an injected "no terminal" really means no t
     await seedProject(dir, git);
     const before = await treeHash(dir);
     const driver = `
-      const { main } = await import(${JSON.stringify(path.join(TOOL_DIR, 'flow.mjs'))});
+      const { main } = await import(${JSON.stringify(pathToFileURL(path.join(TOOL_DIR, 'flow.mjs')).href)});
       const refuse = async () => { throw new Error('asked a question with no terminal'); };
       main([process.argv[1]], {
         interactive: () => false,

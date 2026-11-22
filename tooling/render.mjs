@@ -12,6 +12,7 @@ import {
   pmRunText,
   section,
   nasoCommand,
+  nasoCommandFor,
 } from './lib.mjs';
 import {
   AUTO_END,
@@ -805,9 +806,9 @@ function renderDecisions(facts) {
  */
 function lessonsLine(facts) {
   const lessons = facts.lessons;
-  const record = `When a person corrects you or confirms an approach, record it: \`${nasoCommand()} lesson --title "…" --why "…" --apply "…"\`.`;
+  const record = `When a person corrects you or confirms an approach, record it: \`${nasoCommandFor('lesson', facts)} --title "…" --why "…" --apply "…"\`.`;
   if (!lessons?.indexExists) return record;
-  const where = lessons.where === 'git' ? `\`${nasoCommand()} lessons\` prints the lessons index` : `Lessons from earlier sessions are indexed in \`${lessons.shown}/README.md\``;
+  const where = lessons.where === 'git' ? `\`${nasoCommandFor('lessons', facts)}\` prints the lessons index` : `Lessons from earlier sessions are indexed in \`${lessons.shown}/README.md\``;
   return `${where}, one line each; read a lesson when its line applies. ${record}`;
 }
 
@@ -819,12 +820,12 @@ export function renderReadFirst(facts) {
     ? `1. The handoff this repository keeps, \`${team}\`.`
     : handoff && handoff.where !== 'git'
       ? `1. The handoff's NOW section, in \`${handoff.shown}\`.`
-      : `1. The handoff's NOW section: \`${nasoCommand()} handoff\` prints it (kept in the git directory, shared by every worktree).`;
+      : `1. The handoff's NOW section: \`${nasoCommandFor('handoff', facts)}\` prints it (kept in the git directory, shared by every worktree).`;
   // A handoff of the repository's own is kept its own way; NASO's commands would add their
   // sections to it, so the block says to update it, not how.
   const keep = team
     ? `When a PR opens or merges, when a decision is made, and before you stop: update \`${team}\` the way it is kept.`
-    : `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommand()} handoff set\` (where things stand, next steps, open items) and add a line with \`${nasoCommand()} handoff log "…"\`.`;
+    : `When a PR opens or merges, when a decision is made, and before you stop: replace NOW with \`${nasoCommandFor('handoff', facts)} set\` (where things stand, next steps, open items) and add a line with \`${nasoCommandFor('handoff', facts)} log "…"\`.`;
   const decisionsLine = decisions.indexExists
     ? `3. The decisions in \`${decisions.dir}/README.md\` that apply to the paths you will change.`
     : `3. The decisions that apply to the paths you will change: \`${guideRel('decisions')}\` says where they are kept.`;

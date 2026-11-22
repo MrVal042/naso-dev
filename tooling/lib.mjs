@@ -366,6 +366,21 @@ export function nasoCommand({ version = null } = {}) {
   }
 }
 
+/** Commands a block may tell agents to run, and the naso-dev version that added each. */
+export const COMMAND_SINCE = { handoff: '1.6.0', lesson: '1.6.0', lessons: '1.6.0', claude: '1.6.0', stats: '1.6.0', agents: '2.0.0', workspace: '2.0.0' };
+
+/**
+ * The command for one subcommand, as this repository can run it. Where package.json pins a
+ * naso-dev older than the subcommand, plain \`npx naso-dev\` resolves the pin and answers
+ * "unknown command", so the version that has it is named. \`facts\` carries \`nasoPin\` (the
+ * pinned version, or null) and \`nasoVersion\` (this tool's).
+ */
+export function nasoCommandFor(name, { nasoPin = null, nasoVersion = null } = {}) {
+  const since = COMMAND_SINCE[name];
+  const behind = since && nasoPin && nasoVersion && /^\d+\.\d+\.\d+/.test(nasoPin) && compareVersions(nasoPin, since) < 0;
+  return `${nasoCommand(behind ? { version: nasoVersion } : {})} ${name}`;
+}
+
 /** The command that records the latest naso-dev as a dev dependency, in this manager. */
 export function nasoUpgradeCommand() {
   const { pm } = runnerFacts();

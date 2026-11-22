@@ -1,6 +1,6 @@
 {
   "name": "naso-dev",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "A two-step setup for AI coding agents: generate a briefing the agent can trust, then keep it true mechanically.",
   "type": "module",
   "bin": {
@@ -19,8 +19,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/*.test.mjs",
-    "prepublishOnly": "node --test test/*.test.mjs"
+    "test": "node test/run.mjs",
+    "prepublishOnly": "node test/run.mjs"
   },
   "keywords": [
     "agents",

@@ -21,6 +21,7 @@ import {
   detectPackageManager,
   exactDevInstallText,
   pinAdvice,
+  COMMAND_SINCE,
 } from './lib.mjs';
 import { DECISIONS_LEAD, decisionsLead, readDecisions } from './decisions.mjs';
 import {
@@ -34,7 +35,7 @@ import {
   topLevelEntries,
 } from './scan.mjs';
 import { deriveTraps, TRAPS_HEADING } from './traps.mjs';
-import { ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
+import { GUIDES_DIR, ROOT_LINE_BUDGET, TOPICS, TOUCH_HEADING, readLinkedGuides, splitSections } from './guides.mjs';
 
 // ---------------------------------------------------------------------------
 // Checking
@@ -67,8 +68,7 @@ const EXTENSIONLESS_FILES = /^(?:Makefile|Dockerfile|Containerfile|LICEN[CS]E|NO
 
 const MARKERS = ['TODO(fill)', 'TODO(describe)'];
 
-/** Commands a block may tell agents to run, and the naso-dev version that added each. */
-export const COMMAND_SINCE = { handoff: '1.6.0', lesson: '1.6.0', lessons: '1.6.0', claude: '1.6.0', stats: '1.6.0', agents: '2.0.0', workspace: '2.0.0' };
+export { COMMAND_SINCE } from './lib.mjs';
 
 /** A version written as a template, `vX.Y.Z` or `x.y`: a placeholder, so never a path on disk. */
 const VERSION_TEMPLATE = /(?:^|[/.-])v?[Xx]\.[Yy](?:\.[Zz])?(?:$|[/.-])/;
@@ -494,7 +494,11 @@ export async function checkBriefing(cwd) {
   const uncovered = findUncovered(entries, claimed);
   const wrong = await wrongClaims(cwd, claimed);
   const notes = await versionNotes(cwd, briefing);
-  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layoutNotices(block, guides)] : [];
+  // A single-file block is the right shape where guides could not be committed: migrating
+  // would put its rules where no other clone can read them, so it is not suggested.
+  const guidesLocal = hasBlock && guides.length === 0 && (await localOnlyGuides(cwd, [`${GUIDES_DIR}/decisions.md`])).length > 0;
+  const layout = hasBlock ? layoutNotices(block, guides).filter((notice) => !(guidesLocal && notice.kind === 'single-file')) : [];
+  const notices = hasBlock ? [...(await missingSections(block, cwd)), ...layout] : [];
   if (localOnly.length > 0) {
     notices.push({
       kind: 'local-only',

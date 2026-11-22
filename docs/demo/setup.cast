@@ -1,6 +1,6 @@
 {"version":2,"width":110,"height":44,"title":"npx naso-dev --yes, then stats"}
 [0.56,"o","$ npx naso-dev --yes\r\n"]
-[1.41,"o","NASO 2.0.2  ~/go-cli\r\n"]
+[1.41,"o","NASO 2.0.3  ~/go-cli\r\n"]
 [1.57,"o","Branch             main\r\n"]
 [1.74,"o","Files              9 tracked in the git index\r\n"]
 [1.91,"o","Areas              2 top-level directories (cmd, internal)\r\n"]

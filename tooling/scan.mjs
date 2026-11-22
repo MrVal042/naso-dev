@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import { detectStack } from './stack.mjs';
 import { readCodeowners, readPrecedence, readSourceMap } from './repo-rules.mjs';
 import { readToolchain } from './toolchain.mjs';
-import { documentedBranchPattern } from './lib.mjs';
+import { documentedBranchPattern, recordedNasoVersion, toolVersion } from './lib.mjs';
 import { readDecisions, DECISIONS_LEAD } from './decisions.mjs';
 import { findTeamHandoff, locateHandoff, locateLessons } from './handoff.mjs';
 import { deriveTraps } from './traps.mjs';
@@ -1988,6 +1988,9 @@ export async function scanRepo(cwd, { exclude = null, pendingLocalExcludes = [] 
     decisions: await readDecisions(cwd),
     handoff: await locateHandoff(cwd),
     teamHandoff: await findTeamHandoff(cwd),
+    // What \`npx naso-dev\` resolves here, so every command the block names can run.
+    nasoPin: await recordedNasoVersion(cwd).then((recorded) => (recorded ? (recorded.installed ?? recorded.spec.replace(/^[\^~=v]+/, '')) : null)),
+    nasoVersion: await toolVersion(),
     lessons: await (async () => {
       const located = await locateLessons(cwd);
       return { ...located, indexExists: await pathExists(located.index) };

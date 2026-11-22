@@ -163,3 +163,72 @@ test('a handoff the repository keeps is the one Read First names, and setup writ
     assert.equal(await pathExists(path.join(dir, '.naso', 'HANDOFF.md')), false);
   });
 });
+
+test('the hook runs from a linked worktree of a repository that keeps .naso/ local', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    const setup = await naso([dir, '--yes'], dir);
+    assert.equal(setup.code, 0, setup.stdout + setup.stderr);
+    const wt = await mkdtemp(path.join(os.tmpdir(), 'naso-wt-'));
+    await rm(wt, { recursive: true, force: true });
+    try {
+      await git('worktree', 'add', '-q', wt, '-b', 'feat/x');
+      await put(wt, 'src/extra.js', 'export const x = 1;\n');
+      await exec('git', ['add', 'src/extra.js'], wt);
+      const commit = await exec('git', ['-c', 'user.email=a@b.invalid', '-c', 'user.name=T', 'commit', '-m', 'feat: x'], wt);
+      const out = commit.stdout + commit.stderr;
+      assert.doesNotMatch(out, /pre-commit checks skipped/, out);
+      assert.match(out, /Secrets: PASS/, out);
+    } finally {
+      await rm(wt, { recursive: true, force: true });
+    }
+  });
+});
+
+
+test('a block written where package.json pins an older naso-dev names the version that has each command', async () => {
+  await withRepo(async ({ dir, git }) => {
+    await seedProject(dir, git);
+    const pkg = JSON.parse(await read(dir, 'package.json'));
+    pkg.devDependencies = { ...(pkg.devDependencies ?? {}), 'naso-dev': '1.5.3' };
+    await put(dir, 'package.json', JSON.stringify(pkg, null, 2));
+    await git('add', '-A');
+    await git('commit', '-qm', 'pin');
+    await createBriefing(dir);
+    const block = await readBriefing(dir);
+    const { toolVersion } = await import('../tooling/lib.mjs');
+    const version = await toolVersion();
+    assert.ok(block.includes(`naso-dev@${version} handoff`), block);
+    assert.ok(block.includes(`naso-dev@${version} lesson`), block);
+    assert.doesNotMatch(block, /npx naso-dev handoff/);
+  });
+});
+
+test('a rule CLAUDE.md already states is not drafted into the block again', async () => {
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'CONTRIBUTING.md', '# Contributing\n\nOne ticket per merge request, always, so each review stays small.\n\nBranches are named `feature/<short-name>`.\n');
+    const files = ['CONTRIBUTING.md'];
+    const before = (await deriveTraps(dir, files)).map(String);
+    assert.ok(before.some((trap) => /One ticket per merge request/.test(trap)), before.join('\n'));
+    assert.ok(before.some((trap) => /feature\/<short-name>/.test(trap)));
+
+    await put(dir, 'CLAUDE.md', '# Rules\n\n- Keep each review small: always one ticket per merge request.\n- Name branches `feature/<short-name>`.\n');
+    const after = (await deriveTraps(dir, files)).map(String);
+    assert.ok(!after.some((trap) => /One ticket per merge request/.test(trap)), after.join('\n'));
+    assert.ok(!after.some((trap) => /feature\/<short-name>/.test(trap)), after.join('\n'));
+  });
+});
+
+test('a decisions README with a list of its own is not given a second one', async () => {
+  const { syncDecisionIndex } = await import('../tooling/decisions.mjs');
+  await withRepo(async ({ dir }) => {
+    await put(dir, 'docs/decisions/0007-use-postgres.md', '# 7. Use Postgres\n\n## Status\n\nAccepted\n\n## Decision\n\nPostgres.\n');
+    await put(dir, 'docs/decisions/0008-use-redis.md', '# 8. Use Redis\n\n## Status\n\nAccepted\n\n## Decision\n\nRedis.\n');
+    const own = '# Decisions\n\n- [0007](0007-use-postgres.md) Use Postgres\n';
+    await put(dir, 'docs/decisions/README.md', own);
+    const result = await syncDecisionIndex(dir);
+    assert.equal(result.outcome, 'own-list');
+    assert.deepEqual(result.unlisted.map((record) => record.id), ['0008']);
+    assert.equal(await read(dir, 'docs/decisions/README.md'), own);
+  });
+});
