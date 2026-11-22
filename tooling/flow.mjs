@@ -208,11 +208,14 @@ function reportExistingState(state, cwd, style) {
 /**
  * Ask what the plan depends on, and nothing it does not.
  *
- * Each question defaults to Yes, marked "(recommended)": commit the briefing so every clone
- * gets it, chain a hook NASO did not write, regenerate an untouched block, point the agents
- * this repository uses and Claude Code at it. A run of Enters gives the complete install, and the plan is
- * still shown before anything is written. `--yes` asks nothing, so a scripted run keeps the
- * flags' own defaults. A question whose answer cannot change the plan is
+ * Each question defaults to the answer NASO recommends for this repository, marked
+ * "(recommended)": Yes where it costs the team nothing (the gate, chaining their hook,
+ * regenerating an untouched block, recording the version), No where it would write into
+ * what is theirs (a tracked hooks folder, .claude/, pointers for agents they do not use).
+ * Committing follows the repository: Yes where AGENTS.md is already tracked, so the guides
+ * reach the same clones; No where it is not, so setup leaves no trace. `--yes` asks
+ * nothing, so a scripted run keeps the flags' own defaults. A question whose answer cannot
+ * change the plan is
  * not asked: the hook question only appears when there is a choice to make, and the
  * block question only when there is a block.
  */
@@ -221,7 +224,7 @@ async function ask(style, options, context, io = {}) {
 
   const track = await confirm({
     message: 'Commit AGENTS.md and .naso/ to git, so every clone gets the same briefing? (No keeps them local to this machine.)',
-    initialValue: true,
+    initialValue: options.track || context.agentsTracked === true,
     style,
     ...io,
   });
@@ -247,10 +250,10 @@ async function ask(style, options, context, io = {}) {
   } else if (!noHook && !hookAction && hook.trackedDir) {
     const choice = await select({
       message: `core.hooksPath is ${hook.hooksPath}, which git tracks. Write the pre-commit hook there?`,
-      initialValue: 'install',
+      initialValue: 'skip',
       options: [
-        { value: 'install', label: 'Install there (recommended)', hint: 'the hook becomes a file in your next commit' },
-        { value: 'skip', label: 'Skip', hint: 'no NASO hook; run the gate by hand' },
+        { value: 'install', label: 'Install there', hint: 'the hook becomes a file in your next commit' },
+        { value: 'skip', label: 'Skip (recommended)', hint: 'no NASO hook; run the gate by hand' },
         { value: 'abort', label: 'Abort', hint: 'write nothing at all' },
       ],
       style,
@@ -323,7 +326,8 @@ async function ask(style, options, context, io = {}) {
   }
 
   // Claude Code extras, last, and only from the real flow (it passes `claude`). Hooks and
-  // skills default to Yes. Deny rules default to NASO_SCOPE when it is set; otherwise to No,
+  // skills default to No: they write into .claude/, which is the person's, NASO works
+  // without them, and a team may run its own handoff routine. Deny rules default to NASO_SCOPE when it is set; otherwise to No,
   // because which CODEOWNERS owner the person is cannot be guessed, and a wrong guess denies
   // them their own files.
   if (context.claude) {
@@ -347,12 +351,12 @@ async function ask(style, options, context, io = {}) {
       }
     }
     if (!options.claudeHooks) {
-      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: true, style, ...io });
+      const hooks = await confirm({ message: 'Claude Code hooks: show the handoff at session start, and remind to update it before stopping?', initialValue: false, style, ...io });
       if (isCancel(hooks)) return null;
       extras.claudeHooks = hooks;
     }
     if (!options.claudeSkills) {
-      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: true, style, ...io });
+      const skills = await confirm({ message: 'Claude Code skills: handoff, pre-PR self-review, decide, sweep?', initialValue: false, style, ...io });
       if (isCancel(skills)) return null;
       extras.claudeSkills = skills;
     }
@@ -590,7 +594,8 @@ rest): ${nasoCommand()} --help`);
     const devDependency = devDependencyPlan(pkg, (await detectPackageManager(cwd, pkg)).name, version, { exact: await pinsExactVersions(cwd, pkg) });
     const claude = { owners: await codeownersOwners(cwd).catch(() => []), scope: String(process.env.NASO_SCOPE ?? '').split(',').map((part) => part.trim()).filter(Boolean) };
     const agents = (await detectAgents(cwd)).filter((entry) => !entry.native);
-    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency, claude, agents });
+    const agentsTracked = (await run('git', ['ls-files', '--error-unmatch', '--', 'AGENTS.md'], { cwd })).ok;
+    const answered = await prompts.questions(style, options, { hook: state.hook, hasBlock: state.hasBlock, blockEdited: state.blockEdited, devDependency, claude, agents, agentsTracked });
     if (answered === null) {
       prompts.done(style.warn('Cancelled. Nothing was written.'));
       return;

@@ -130,7 +130,9 @@ test('in a terminal, setup asks about other agents, Enter answers the recommende
   const agents = [{ name: 'cursor', label: 'Cursor', signs: ['.cursor'] }];
   const defaults = await answerRealQuestions({ hook: none, hasBlock: false, agents }, ['\r', '\r', '\r']);
   assert.deepEqual(defaults.answer.agents, ['cursor']);
-  assert.equal(defaults.answer.track, true, 'Enter commits the briefing');
+  assert.equal(defaults.answer.track, false, 'AGENTS.md is not tracked here, so Enter keeps NASO local');
+  const tracked = await answerRealQuestions({ hook: none, hasBlock: false, agents, agentsTracked: true }, ['\r', '\r', '\r']);
+  assert.equal(tracked.answer.track, true, 'a team that commits AGENTS.md gets the guides committed with it');
   assert.match(defaults.frames, /Point other agents at AGENTS\.md/);
   assert.match(defaults.frames, /The ones set up here: Cursor \(recommended\)/);
 
